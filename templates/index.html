@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Artificial Dungeon</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=4">
+</head>
+<body>
+  <main id="grid-container" hidden>
+    <section id="chat-pane" aria-label="Chat and system messages">
+      <div id="chat-messages" aria-live="polite"></div>
+      <form id="chat-form">
+        <input id="chat-input" maxlength="1000" autocomplete="off"
+               placeholder="Chat with the party..." aria-label="Chat message">
+      </form>
+    </section>
+    <header id="title-pane">
+      <span id="scenario-title">Awaiting scenario initialization...</span>
+      <span id="player-identity" aria-label="Current player"></span>
+    </header>
+    <section id="state-pane" aria-label="Scenario state" aria-live="polite"></section>
+    <section id="log-pane" aria-label="Action resolutions" aria-live="polite"></section>
+    <form id="input-pane">
+      <input type="text" id="action-input" maxlength="4000" disabled
+             autocomplete="off" placeholder="Waiting for your turn..."
+             aria-label="Your character action">
+    </form>
+  </main>
+
+  <div id="login-modal" class="modal" role="dialog" aria-modal="true">
+    <form id="login-form" class="modal-card">
+      <h1>Artificial Dungeon</h1>
+      <p>The first user must enter the host password. Other users join afterward.</p>
+      <label for="name-input">Player name</label>
+      <input id="name-input" maxlength="40" required autocomplete="nickname">
+      <label for="password-input">Password</label>
+      <input id="password-input" type="password" maxlength="200" required
+             autocomplete="current-password">
+      <button type="submit">Join game</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </div>
+
+  <div id="host-modal" class="modal" role="dialog" aria-modal="true" hidden>
+    <div class="modal-card">
+      <section id="scenario-step">
+        <h2>Create the scenario</h2>
+        <form id="scenario-form">
+          <label for="scenario-input">Describe the setting, characters, and opening situation</label>
+          <textarea id="scenario-input" maxlength="20000" required></textarea>
+          <label for="guidance-input">Additional DM guidance (optional)</label>
+          <textarea id="guidance-input" maxlength="5000"
+                    placeholder="Example: Include a small possibility of something extremely random happening whenever players act."></textarea>
+          <button type="submit">Generate scenario</button>
+        </form>
+      </section>
+      <section id="lobby-step" hidden>
+        <h2>Scenario ready</h2>
+        <p>Players may now join. Start when everyone is ready.</p>
+        <button id="start-button" type="button">Start game</button>
+      </section>
+      <p id="host-status" role="status"></p>
+    </div>
+  </div>
+
+  <div id="connection-status" role="status">Connecting...</div>
+  <script src="/static/js/app.js?v=4"></script>
+</body>
+</html>

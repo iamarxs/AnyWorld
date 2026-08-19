@@ -1,0 +1,31 @@
+"""Command-line entry point for Artificial Dungeon."""
+
+import argparse
+import logging
+
+import uvicorn
+
+from core.config import settings
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="LLM RPG Orchestrator Gateway")
+    parser.add_argument(
+        "--host", type=str, default=settings.server.host, help="Bind socket to this host."
+    )
+    parser.add_argument(
+        "--port", type=int, default=settings.server.port, help="Bind socket to this port."
+    )
+    parser.add_argument("--reload", action="store_true", help="Enable development auto-reload.")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logging.info("Launching Artificial Dungeon on %s:%s", args.host, args.port)
+    uvicorn.run("api.server:app", host=args.host, port=args.port, reload=args.reload)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,259 @@
+:root {
+    --background: #0d1117;
+    --panel: #161b22;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --error: #ff7b72;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    background: var(--background);
+    color: var(--text);
+    font-family: ui-monospace, "Cascadia Code", monospace;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+#grid-container {
+    display: grid;
+    grid-template-columns: 20% 80%;
+    grid-template-rows: 3% 25% 67% 5%;
+    grid-template-areas:
+        "chat title"
+        "chat state"
+        "chat log"
+        "chat input";
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#chat-pane {
+    grid-area: chat;
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+}
+
+#chat-messages,
+#state-pane,
+#log-pane {
+    min-height: 0;
+    padding: 0.75rem;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+}
+
+#chat-messages {
+    flex: 1;
+}
+
+#chat-form,
+#input-pane {
+    display: flex;
+    border-top: 1px solid var(--border);
+}
+
+#title-pane {
+    position: relative;
+    grid-area: title;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 9rem;
+    border-bottom: 1px solid var(--border);
+    font-weight: bold;
+}
+
+#scenario-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#player-identity {
+    position: absolute;
+    right: 0.75rem;
+    padding: 0.15rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--accent);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+#state-pane {
+    grid-area: state;
+    border-bottom: 1px solid var(--border);
+}
+
+#log-pane {
+    grid-area: log;
+}
+
+#input-pane {
+    grid-area: input;
+}
+
+input,
+textarea,
+button {
+    border: 1px solid var(--border);
+    background: #010409;
+    color: inherit;
+    font: inherit;
+}
+
+input,
+textarea {
+    padding: 0.65rem;
+}
+
+#action-input,
+#chat-input {
+    width: 100%;
+    border: 0;
+    outline: none;
+}
+
+#action-input:disabled {
+    background: #21262d;
+    color: var(--muted);
+    cursor: not-allowed;
+}
+
+button {
+    padding: 0.65rem 1rem;
+    border-color: var(--accent);
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.modal {
+    position: fixed;
+    z-index: 10;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(1 4 9 / 88%);
+}
+
+.modal-card {
+    display: grid;
+    width: min(36rem, 100%);
+    max-height: 90vh;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--panel);
+}
+
+.modal-card h1,
+.modal-card h2,
+.modal-card p {
+    margin: 0;
+}
+
+#scenario-form {
+    display: grid;
+    gap: 0.75rem;
+}
+
+#scenario-input {
+    min-height: 12rem;
+    resize: vertical;
+}
+
+#guidance-input {
+    min-height: 6rem;
+    resize: vertical;
+}
+
+.action-entry,
+.resolution-entry,
+.chat-entry {
+    margin: 0 0 0.7rem;
+    white-space: pre-wrap;
+}
+
+.state-entry {
+    margin: 0 0 0.7rem;
+    padding: 0.65rem 0.75rem;
+    border-left: 3px solid var(--border);
+    border-radius: 0.25rem;
+    background: rgb(22 27 34 / 55%);
+    color: var(--muted);
+}
+
+.state-entry.current-state {
+    border-left-color: var(--accent);
+    background: #1b2430;
+    color: var(--text);
+    box-shadow: 0 0 0 1px rgb(88 166 255 / 15%);
+}
+
+.state-round-label {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: var(--accent);
+}
+
+.state-narrative {
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+.round-heading {
+    margin: 1.8rem 0 0.9rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 1.05rem;
+    font-weight: bold;
+    white-space: pre-wrap;
+}
+
+.round-heading:first-child {
+    margin-top: 0;
+}
+
+.action-entry {
+    color: var(--muted);
+}
+
+.error {
+    min-height: 1.2em;
+    color: var(--error);
+}
+
+#connection-status {
+    position: fixed;
+    right: 0.5rem;
+    bottom: 0.25rem;
+    color: var(--muted);
+    pointer-events: none;
+}
