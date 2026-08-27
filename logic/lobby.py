@@ -43,7 +43,9 @@ class LobbyMixin:
                 if not hmac.compare_digest(password, settings.server.host_password):
                     error = "The host must join first with the host password."
                 else:
-                    self.players[client_id] = Player(client_id, name, True)
+                    player = Player(client_id, name, True, join_index=len(self.join_order))
+                    self.players[client_id] = player
+                    self.join_order.append(client_id)
                     self.turn_queue.append(client_id)
                     self.state = GameState.SCENARIO_INJECTION
             elif self.state not in {
@@ -60,7 +62,9 @@ class LobbyMixin:
             elif any(player.name.casefold() == name.casefold() for player in self.players.values()):
                 error = "That player name is already in use."
             else:
-                self.players[client_id] = Player(client_id, name, False)
+                player = Player(client_id, name, False, join_index=len(self.join_order))
+                self.players[client_id] = player
+                self.join_order.append(client_id)
                 self.turn_queue.append(client_id)
 
             player = self.players.get(client_id)
@@ -75,6 +79,7 @@ class LobbyMixin:
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": f"{name} {verb}."})
         )
+        await self.sender.broadcast_global(self._player_roster_event())
 
     async def _chat(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         message = self._clean_text(data.get("message"), "message", 1_000)
@@ -105,7 +110,16 @@ class LobbyMixin:
             await self._send_error(client_id, error)
             return
 
-        self.resolver.set_genesis(scenario, guidance)
+        # Store only the scenario text for clients; DM guidance remains resolver-only.
+        async with self.lock:
+            self.original_scenario = scenario
+        try:
+            self.resolver.set_genesis(scenario, guidance)
+        except TypeError as exc:
+            # Preserve compatibility with lightweight resolver adapters that predate guidance.
+            if "positional" not in str(exc) and "argument" not in str(exc):
+                raise
+            self.resolver.set_genesis(scenario)
         try:
             resolution = await self.resolver.generate_initial_state()
         except LLMResolutionError as exc:
@@ -119,8 +133,10 @@ class LobbyMixin:
             self.scenario_title = resolution.round_title or "Untitled Session"
             self.current_scenario_state = resolution.global_narrative
             self.state = GameState.AWAITING_PLAYERS
+        initial_payload = resolution.model_dump()
+        initial_payload["original_scenario"] = scenario
         await self.sender.broadcast_global(
-            ServerEvent(type="state_update", payload=resolution.model_dump())
+            ServerEvent(type="state_update", payload=initial_payload)
         )
         await self.sender.send_personal(
             client_id,
@@ -163,6 +179,21 @@ class LobbyMixin:
         if directive is not None:
             await self.sender.broadcast_global(directive)
 
+    def _player_roster_event(self: "GameEngine") -> ServerEvent:
+        return ServerEvent(
+            type="player_roster",
+            payload={
+                "players": [
+                    {
+                        "name": self.players[player_id].name,
+                        "connected": self.players[player_id].is_connected,
+                        "is_host": self.players[player_id].is_host,
+                    }
+                    for player_id in self.join_order
+                ]
+            },
+        )
+
     def _snapshot_locked(self: "GameEngine", player: Player) -> dict[str, object]:
         return {
             "client_id": player.client_id,
@@ -170,6 +201,7 @@ class LobbyMixin:
             "is_host": player.is_host,
             "state": self.state.name,
             "scenario_title": self.scenario_title,
+            "original_scenario": self.original_scenario,
             "scenario_state": self.current_scenario_state,
             "completed_round_number": self.round_counter or None,
             "active_player_id": self.active_player_id,
@@ -184,4 +216,13 @@ class LobbyMixin:
                 else None
             ),
             "submitted_actions": self._submitted_actions_locked(),
+            "player_order": [self.players[client_id].name for client_id in self.join_order],
+            "players": [
+                {
+                    "name": self.players[client_id].name,
+                    "connected": self.players[client_id].is_connected,
+                    "is_host": self.players[client_id].is_host,
+                }
+                for client_id in self.join_order
+            ],
         }

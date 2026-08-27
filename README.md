@@ -23,17 +23,20 @@ server:
   port: 4141
   host_password: "admin"
   player_password: "play"
-  max_players: 4
+  max_players: 6
 llm:
   endpoint: "http://localhost:8033/v1"
   api_key: "sk-no-key-required"
   context_window_size: 128000
+  tokenizer_encoding: "cl100k_base"
   model_name: "local"
   system_prompt: >
     Direct the game fluently and creatively.
 ```
 
-The endpoint must support OpenAI-compatible structured chat completion parsing.
+The endpoint must support OpenAI-compatible structured chat completion parsing. Set
+`tokenizer_encoding` to the [tiktoken](https://github.com/openai/tiktoken) encoding used by the
+configured model so context-window accounting remains exact.
 
 ## Install (Windows Git Bash)
 

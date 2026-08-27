@@ -98,7 +98,7 @@ def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
         assert "Round: 1\nState: Two adventurers stand at a gate." in transcript
         assert "Host: Opens the gate" in transcript
         assert "Player: Keeps watch" in transcript
-        assert "State: State after round 1." in transcript
+        assert "Resulting state: State after round 1." in transcript
 
     asyncio.run(run())
 
@@ -114,7 +114,11 @@ def test_active_disconnect_injects_idle_and_advances(tmp_path: Path) -> None:
         assert resolver.rounds == 1
         assert engine.active_player_id == "host"
         state_event = sender.events_of_type("state_update")[-1]
-        assert state_event.payload["player_resolutions"]["Player"] == (f"Resolved: {IDLE_ACTION}")
+        player_result = state_event.payload["player_resolutions"]["Player"]
+        assert player_result.startswith(
+            "Resolved: [SYSTEM: Explain this player's in-world departure"
+        )
+        assert player_result.endswith(IDLE_ACTION)
         assert sender.events_of_type("system_msg")[-1].payload["msg"] == ("Player disconnected.")
 
     asyncio.run(run())

@@ -1,11 +1,37 @@
 "use strict";
 
 const storedId = sessionStorage.getItem("artificialDungeonClientId");
-const clientId = storedId || crypto.randomUUID();
+
+// crypto.randomUUID() is unavailable on non-secure HTTP origins except localhost.
+// Use a standards-compatible fallback so remote HTTP clients do not fail before
+// the WebSocket is even created.
+function createClientId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+    }
+    if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+        return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+    }
+    return `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const clientId = storedId || createClientId();
 sessionStorage.setItem("artificialDungeonClientId", clientId);
 
 const socketScheme = window.location.protocol === "https:" ? "wss" : "ws";
-const ws = new WebSocket(`${socketScheme}://${window.location.host}/ws/${clientId}`);
+// WAN routes and reverse proxies can drop an initial handshake. Retry the socket
+// without requiring the user to reload the login page manually.
+let ws = new WebSocket(`${socketScheme}://${window.location.host}/ws/${clientId}`);
+let connectionTimer = setTimeout(() => {
+    if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+    }
+}, 10000);
 
 const elements = {
     grid: document.getElementById("grid-container"),
@@ -26,11 +52,13 @@ const elements = {
     identity: document.getElementById("player-identity"),
     state: document.getElementById("state-pane"),
     log: document.getElementById("log-pane"),
+    playerList: document.getElementById("player-list"),
     chatMessages: document.getElementById("chat-messages"),
     chatForm: document.getElementById("chat-form"),
     chatInput: document.getElementById("chat-input"),
     actionForm: document.getElementById("input-pane"),
     actionInput: document.getElementById("action-input"),
+    dmThinking: document.getElementById("dm-thinking"),
     connectionStatus: document.getElementById("connection-status"),
 };
 
@@ -38,6 +66,7 @@ let authenticated = false;
 let isHost = false;
 let lastStartedRound = 0;
 const renderedActions = new Set();
+const playerColors = new Map();
 
 function send(eventType, data) {
     if (ws.readyState !== WebSocket.OPEN) {
@@ -64,20 +93,79 @@ function startRound(roundNumber) {
     appendText(elements.log, `Round ${roundNumber}:`, "round-heading");
 }
 
-function showAction(roundNumber, playerName, action) {
+function setPlayerOrder(playerOrder = []) {
+    playerOrder.forEach((playerName, index) => {
+        if (!playerColors.has(playerName)) {
+            playerColors.set(playerName, index % 8);
+        }
+    });
+}
+
+function renderPlayers(players = []) {
+    elements.playerList.replaceChildren();
+    players.forEach((player, index) => {
+        playerColors.set(player.name, index % 8);
+        const item = document.createElement("li");
+        item.className = player.connected ? "player-online" : "player-offline";
+        const dot = document.createElement("span");
+        dot.className = "presence-dot";
+        const name = document.createElement("span");
+        name.textContent = `${player.name}${player.is_host ? " · Host" : ""}`;
+        item.append(dot, name);
+        elements.playerList.appendChild(item);
+    });
+}
+
+function setThinking(active) {
+    elements.dmThinking.hidden = !active;
+    elements.log.classList.toggle("is-thinking", active);
+    if (active) {
+        elements.dmThinking.scrollIntoView({ block: "end", behavior: "smooth" });
+    }
+}
+
+function playerColorClass(playerName) {
+    const colorIndex = playerColors.get(playerName);
+    return colorIndex === undefined ? "" : ` player-color-${colorIndex}`;
+}
+
+function showAction(roundNumber, playerName, action, colorIndex = null) {
+    if (Number.isInteger(colorIndex)) {
+        playerColors.set(playerName, colorIndex % 8);
+    }
     const actionKey = `${roundNumber}:${playerName}:${action}`;
     if (renderedActions.has(actionKey)) {
         return;
     }
     renderedActions.add(actionKey);
     startRound(roundNumber);
-    appendText(elements.log, `${playerName} attempts: ${action}`, "action-entry");
+    appendText(
+        elements.log,
+        `${playerName} attempts: ${action}`,
+        `action-entry${playerColorClass(playerName)}`,
+    );
 }
 
 function syncActions(roundNumber, submittedActions = {}) {
     Object.entries(submittedActions).forEach(([playerName, action]) => {
         showAction(roundNumber, playerName, action);
     });
+}
+
+function appendScenario(scenario) {
+    if (!scenario) {
+        return;
+    }
+    const entry = document.createElement("article");
+    entry.className = "state-entry original-scenario";
+    const label = document.createElement("strong");
+    label.className = "state-round-label";
+    label.textContent = "Opening scenario";
+    const narrative = document.createElement("p");
+    narrative.className = "state-narrative";
+    narrative.textContent = scenario;
+    entry.append(label, narrative);
+    elements.state.appendChild(entry);
 }
 
 function appendState(text, roundNumber = null) {
@@ -130,11 +218,14 @@ function applyTurn(activePlayerId, activePlayerName) {
 
 function applySnapshot(payload) {
     isHost = payload.is_host;
+    setPlayerOrder(payload.player_order);
+    renderPlayers(payload.players);
     elements.identity.textContent = `${payload.name}${isHost ? " (Host)" : ""}`;
     if (payload.scenario_title) {
         elements.title.textContent = payload.scenario_title;
     }
     elements.state.replaceChildren();
+    appendScenario(payload.original_scenario);
     if (payload.scenario_state) {
         appendState(payload.scenario_state, payload.completed_round_number);
     }
@@ -166,17 +257,35 @@ function handleMessage(message) {
     } else if (type === "round_start") {
         startRound(payload.round_number);
     } else if (type === "action_echo") {
-        showAction(payload.round_number, payload.player_name, payload.action);
+        showAction(
+            payload.round_number,
+            payload.player_name,
+            payload.action,
+            payload.player_color_index,
+        );
     } else if (type === "state_update") {
+        setThinking(false);
+        setPlayerOrder(payload.player_order);
         if (payload.round_title) {
             elements.title.textContent = payload.round_title;
         }
         startRound(payload.round_number);
         syncActions(payload.round_number, payload.submitted_actions);
+        if (payload.original_scenario && !elements.state.querySelector(".original-scenario")) {
+            appendScenario(payload.original_scenario);
+        }
         appendState(payload.global_narrative, payload.round_number);
         Object.entries(payload.player_resolutions).forEach(([player, resolution]) => {
-            appendText(elements.log, `[${player}] ${resolution}`, "resolution-entry");
+            appendText(
+                elements.log,
+                `[${player}] ${resolution}`,
+                `resolution-entry${playerColorClass(player)}`,
+            );
         });
+    } else if (type === "player_roster") {
+        renderPlayers(payload.players);
+    } else if (type === "dm_thinking") {
+        setThinking(Boolean(payload.active));
     } else if (type === "chat_echo") {
         appendText(elements.chatMessages, `${payload.name}: ${payload.chat}`, "chat-entry");
     } else if (type === "system_msg") {
@@ -197,6 +306,7 @@ function handleMessage(message) {
 }
 
 ws.addEventListener("open", () => {
+    clearTimeout(connectionTimer);
     elements.connectionStatus.textContent = "Connected";
 });
 
@@ -210,9 +320,10 @@ ws.addEventListener("message", (event) => {
 });
 
 ws.addEventListener("close", () => {
-    elements.connectionStatus.textContent = "Disconnected — reload to reconnect";
+    elements.connectionStatus.textContent = "Reconnecting...";
     elements.actionInput.disabled = true;
     elements.chatInput.disabled = true;
+    window.setTimeout(() => window.location.reload(), 1500);
 });
 
 ws.addEventListener("error", () => {

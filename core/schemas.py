@@ -27,6 +27,8 @@ class ServerEvent(StrictModel):
         "scenario_ready",
         "round_start",
         "action_echo",
+        "player_roster",
+        "dm_thinking",
     ]
     payload: dict[str, Any]
 

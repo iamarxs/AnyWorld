@@ -20,6 +20,7 @@ class Player:
     client_id: str
     name: str
     is_host: bool
+    join_index: int = 0
     is_connected: bool = True
     departure_pending: bool = False
     return_pending: bool = False

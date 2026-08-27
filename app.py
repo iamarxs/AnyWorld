@@ -24,7 +24,15 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.info("Launching Artificial Dungeon on %s:%s", args.host, args.port)
-    uvicorn.run("api.server:app", host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run(
+        "api.server:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        # Keep idle WAN WebSocket connections alive through NAT/proxies.
+        ws_ping_interval=20,
+        ws_ping_timeout=20,
+    )
 
 
 if __name__ == "__main__":

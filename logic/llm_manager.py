@@ -4,6 +4,7 @@ from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import ValidationError
+import tiktoken
 
 from core.config import settings
 from core.schemas import RoundResolution
@@ -22,6 +23,12 @@ class LLMContextManager:
             base_url=settings.llm.endpoint,
         )
         self.system_prompt = {"role": "system", "content": settings.llm.system_prompt}
+        try:
+            self.encoding = tiktoken.get_encoding(settings.llm.tokenizer_encoding)
+        except ValueError as exc:
+            raise ValueError(
+                f"Unknown tokenizer encoding: {settings.llm.tokenizer_encoding}"
+            ) from exc
         self.genesis_state: dict[str, str] | None = None
         self.history: list[dict[str, str]] = []
 
@@ -94,7 +101,7 @@ class LLMContextManager:
         return resolution
 
     def _bounded_messages(self, prompt: dict[str, str]) -> list[dict[str, str]]:
-        """Evict oldest round pairs using UTF-8 bytes as a conservative token bound."""
+        """Evict oldest round pairs using the configured model tokenizer."""
         fixed = [self.system_prompt]
         if self.genesis_state is not None:
             fixed.append(self.genesis_state)
@@ -114,9 +121,10 @@ class LLMContextManager:
         self.history = history
         return messages
 
-    @staticmethod
-    def _context_size(messages: list[dict[str, str]]) -> int:
-        return sum(len(message["content"].encode("utf-8")) + 16 for message in messages)
+    def _context_size(self, messages: list[dict[str, str]]) -> int:
+        # Four framing tokens per message is the OpenAI chat format baseline. Reserving
+        # output space separately keeps minor server-specific framing differences safe.
+        return 3 + sum(len(self.encoding.encode(message["content"])) + 4 for message in messages)
 
 
 llm_manager = LLMContextManager()

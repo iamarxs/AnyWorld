@@ -4,12 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Artificial Dungeon</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=4">
+  <link rel="stylesheet" href="/static/css/style.css?v=6">
 </head>
 <body>
   <main id="grid-container" hidden>
-    <section id="chat-pane" aria-label="Chat and system messages">
-      <div id="chat-messages" aria-live="polite"></div>
+    <section id="chat-pane" aria-label="Players and party chat">
+      <div id="player-roster" aria-label="Current players">
+        <h2>Players</h2>
+        <ul id="player-list"></ul>
+      </div>
+      <div id="chat-messages" aria-label="Party chat" aria-live="polite"></div>
       <form id="chat-form">
         <input id="chat-input" maxlength="1000" autocomplete="off"
                placeholder="Chat with the party..." aria-label="Chat message">
@@ -19,8 +23,15 @@
       <span id="scenario-title">Awaiting scenario initialization...</span>
       <span id="player-identity" aria-label="Current player"></span>
     </header>
-    <section id="state-pane" aria-label="Scenario state" aria-live="polite"></section>
-    <section id="log-pane" aria-label="Action resolutions" aria-live="polite"></section>
+    <section id="state-pane" data-pane-title="Scenario status"
+             aria-label="Scenario status" aria-live="polite"></section>
+    <section id="log-pane" data-pane-title="Player round actions"
+             aria-label="Player round actions and resolutions" aria-live="polite">
+      <div id="dm-thinking" hidden role="status">
+        <span class="thinking-orb" aria-hidden="true"></span>
+        The Dungeon Master is weaving the outcome…
+      </div>
+    </section>
     <form id="input-pane">
       <input type="text" id="action-input" maxlength="4000" disabled
              autocomplete="off" placeholder="Waiting for your turn..."
@@ -65,6 +76,6 @@
   </div>
 
   <div id="connection-status" role="status">Connecting...</div>
-  <script src="/static/js/app.js?v=4"></script>
+  <script src="/static/js/app.js?v=5"></script>
 </body>
 </html>

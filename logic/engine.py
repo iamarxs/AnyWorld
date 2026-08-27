@@ -23,12 +23,15 @@ class GameEngine(LobbyMixin):
         self.resolver = resolver
         self.state = GameState.AWAITING_HOST
         self.players: dict[str, Player] = {}
+        self.join_order: list[str] = []
         self.turn_queue: deque[str] = deque()
         self.round_buffer: dict[str, str] = {}
         self.active_player_id: str | None = None
         self.lock = asyncio.Lock()
         self.round_counter = 0
         self.scenario_title: str | None = None
+        # Keep the host's public scenario separate from the private DM guidance.
+        self.original_scenario: str | None = None
         self.current_scenario_state: str | None = None
         self.transcript = GameTranscript()
 
@@ -69,6 +72,7 @@ class GameEngine(LobbyMixin):
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": f"{player.name} disconnected."})
         )
+        await self.sender.broadcast_global(self._player_roster_event())
         if directive is not None:
             await self.sender.broadcast_global(directive)
         if actions is not None:
@@ -95,6 +99,7 @@ class GameEngine(LobbyMixin):
                     payload={
                         "round_number": self.round_counter + 1,
                         "player_name": player.name,
+                        "player_color_index": player.join_index,
                         "action": action,
                     },
                 )
@@ -133,6 +138,7 @@ class GameEngine(LobbyMixin):
                     "active_player_name": player.name,
                     "round_number": self.round_counter + 1,
                     "submitted_actions": self._submitted_actions_locked(),
+                    "player_order": [self.players[player_id].name for player_id in self.join_order],
                 },
             )
         self.active_player_id = None
@@ -152,6 +158,9 @@ class GameEngine(LobbyMixin):
         return dict(self.round_buffer)
 
     async def _resolve_round(self, actions: dict[str, str]) -> None:
+        await self.sender.broadcast_global(
+            ServerEvent(type="dm_thinking", payload={"active": True})
+        )
         previous_state = self.current_scenario_state or ""
         async with self.lock:
             participant_data = {
@@ -185,6 +194,9 @@ class GameEngine(LobbyMixin):
                 self.round_buffer.clear()
                 self.state = GameState.ACTIVE_TURN
                 directive = self._next_turn_locked()
+            await self.sender.broadcast_global(
+                ServerEvent(type="dm_thinking", payload={"active": False})
+            )
             await self.sender.broadcast_global(
                 ServerEvent(type="error", payload={"msg": f"Round discarded: {exc}"})
             )
@@ -229,6 +241,12 @@ class GameEngine(LobbyMixin):
         state_payload["submitted_actions"] = {
             name: action for name, action in display_actions.items() if action != IDLE_ACTION
         }
+        state_payload["player_order"] = [
+            self.players[client_id].name for client_id in self.join_order
+        ]
+        await self.sender.broadcast_global(
+            ServerEvent(type="dm_thinking", payload={"active": False})
+        )
         await self.sender.broadcast_global(ServerEvent(type="state_update", payload=state_payload))
         if directive is not None:
             await self.sender.broadcast_global(

@@ -69,7 +69,8 @@ def test_websocket_and_resolution_schemas_are_strict() -> None:
 def test_context_history_evicts_oldest_round_pairs() -> None:
     manager = LLMContextManager()
     manager.set_genesis("A short beginning")
-    large_message = "x" * 40_000
+    # Spaces prevent BPE from collapsing the fixture into a tiny repeated-token run.
+    large_message = "x " * 40_000
     manager.history = [
         {"role": "user", "content": large_message},
         {"role": "assistant", "content": large_message},

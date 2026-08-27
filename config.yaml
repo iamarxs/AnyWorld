@@ -8,6 +8,7 @@ llm:
   endpoint: "http://localhost:8033/v1"
   api_key: "sk-no-key-required"
   context_window_size: 128000
+  tokenizer_encoding: "cl100k_base"
   model_name: "local"
   system_prompt: |
     You are the Dungeon Master, world simulator, and rules arbiter for a multiplayer text

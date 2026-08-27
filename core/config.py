@@ -48,6 +48,7 @@ class LLMConfig(BaseModel):
     endpoint: str = Field(default="http://localhost:8033/v1", min_length=1)
     api_key: str = Field(default="sk-no-key-required", min_length=1)
     context_window_size: int = Field(default=128_000, ge=2_048)
+    tokenizer_encoding: str = Field(default="cl100k_base", min_length=1)
     model_name: str = Field(default="local", min_length=1)
     system_prompt: str = Field(default=DEFAULT_PROMPT, min_length=1)
 
