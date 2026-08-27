@@ -1,11 +1,13 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Artificial Dungeon</title>
   <link rel="stylesheet" href="/static/css/style.css?v=6">
 </head>
+
 <body>
   <main id="grid-container" hidden>
     <section id="chat-pane" aria-label="Players and party chat">
@@ -15,27 +17,26 @@
       </div>
       <div id="chat-messages" aria-label="Party chat" aria-live="polite"></div>
       <form id="chat-form">
-        <input id="chat-input" maxlength="1000" autocomplete="off"
-               placeholder="Chat with the party..." aria-label="Chat message">
+        <input id="chat-input" maxlength="1000" autocomplete="off" placeholder="Chat with the party..."
+          aria-label="Chat message">
       </form>
     </section>
     <header id="title-pane">
       <span id="scenario-title">Awaiting scenario initialization...</span>
       <span id="player-identity" aria-label="Current player"></span>
     </header>
-    <section id="state-pane" data-pane-title="Scenario status"
-             aria-label="Scenario status" aria-live="polite"></section>
-    <section id="log-pane" data-pane-title="Player round actions"
-             aria-label="Player round actions and resolutions" aria-live="polite">
+    <section id="state-pane" data-pane-title="Scenario status" aria-label="Scenario status" aria-live="polite">
+    </section>
+    <section id="log-pane" data-pane-title="Player round actions" aria-label="Player round actions and resolutions"
+      aria-live="polite">
       <div id="dm-thinking" hidden role="status">
         <span class="thinking-orb" aria-hidden="true"></span>
         The Dungeon Master is weaving the outcome…
       </div>
     </section>
     <form id="input-pane">
-      <input type="text" id="action-input" maxlength="4000" disabled
-             autocomplete="off" placeholder="Waiting for your turn..."
-             aria-label="Your character action">
+      <input type="text" id="action-input" maxlength="4000" disabled autocomplete="off"
+        placeholder="Waiting for your turn..." aria-label="Your character action">
     </form>
   </main>
 
@@ -46,8 +47,7 @@
       <label for="name-input">Player name</label>
       <input id="name-input" maxlength="40" required autocomplete="nickname">
       <label for="password-input">Password</label>
-      <input id="password-input" type="password" maxlength="200" required
-             autocomplete="current-password">
+      <input id="password-input" type="password" maxlength="200" required autocomplete="current-password">
       <button type="submit">Join game</button>
       <p id="login-error" class="error" role="alert"></p>
     </form>
@@ -62,7 +62,7 @@
           <textarea id="scenario-input" maxlength="20000" required></textarea>
           <label for="guidance-input">Additional DM guidance (optional)</label>
           <textarea id="guidance-input" maxlength="5000"
-                    placeholder="Example: Include a small possibility of something extremely random happening whenever players act."></textarea>
+            placeholder="Example: Include a small possibility of something extremely random happening whenever players act."></textarea>
           <button type="submit">Generate scenario</button>
         </form>
       </section>
@@ -78,4 +78,5 @@
   <div id="connection-status" role="status">Connecting...</div>
   <script src="/static/js/app.js?v=5"></script>
 </body>
+
 </html>

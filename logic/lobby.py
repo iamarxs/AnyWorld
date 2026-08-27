@@ -145,6 +145,7 @@ class LobbyMixin:
 
     async def _start_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         del data
+        title = "Untitled Session"
         async with self.lock:
             player = self.players.get(client_id)
             if player is None or not player.is_host:
@@ -156,7 +157,7 @@ class LobbyMixin:
                 self.state = GameState.ACTIVE_TURN
                 directive = self._next_turn_locked()
                 initial_state = self.current_scenario_state or ""
-                title = self.scenario_title or "Untitled Session"
+                title = self.scenario_title
         if error is not None:
             await self._send_error(client_id, error)
             return

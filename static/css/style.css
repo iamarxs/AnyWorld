@@ -9,14 +9,14 @@
     --accent-bright: #83c3df;
     --action-accent: #b49acb;
     --error: #e47d7d;
-    --player-0: #79c0ff;
-    --player-1: #ffa657;
-    --player-2: #56d364;
-    --player-3: #ff7b72;
-    --player-4: #d2a8ff;
-    --player-5: #f2cc60;
-    --player-6: #a5d6ff;
-    --player-7: #ff9bce;
+    --player-0: #5f95c4;
+    --player-1: #c08a5e;
+    --player-2: #5aa06a;
+    --player-3: #c4726c;
+    --player-4: #a68ac4;
+    --player-5: #b3a05e;
+    --player-6: #7fa3c9;
+    --player-7: #b96f9c;
 }
 * {
     box-sizing: border-box;
