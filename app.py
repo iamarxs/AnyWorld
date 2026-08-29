@@ -1,7 +1,8 @@
-"""Command-line entry point for Artificial Dungeon."""
+"""Command-line entry point for Anyworld."""
 
 import argparse
 import logging
+import sys
 
 import uvicorn
 
@@ -9,6 +10,12 @@ from core.config import settings
 
 
 def main() -> None:
+    try:
+        settings.server.validate_passwords()
+    except ValueError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
     parser = argparse.ArgumentParser(description="LLM RPG Orchestrator Gateway")
     parser.add_argument(
         "--host", type=str, default=settings.server.host, help="Bind socket to this host."
@@ -23,7 +30,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    logging.info("Launching Artificial Dungeon on %s:%s", args.host, args.port)
+    logging.info("Launching Anyworld on %s:%s", args.host, args.port)
     uvicorn.run(
         "api.server:app",
         host=args.host,
