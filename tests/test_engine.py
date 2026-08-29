@@ -42,6 +42,12 @@ class FakeResolver:
             player_resolutions={},
         )
 
+    async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
+        return RoundResolution(
+            global_narrative=f"{', '.join(player_names)} stand at a gate.",
+            player_resolutions={},
+        )
+
     async def generate_resolution(self, round_buffer: dict[str, str]) -> RoundResolution:
         self.rounds += 1
         return RoundResolution(
@@ -162,7 +168,7 @@ def test_host_can_end_game_and_finalize_transcript(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_raw_password_is_rejected(tmp_path: Path) -> None:
+def test_raw_password_is_accepted(tmp_path: Path) -> None:
     async def run() -> None:
         sender = FakeSender()
         engine = GameEngine(sender, FakeResolver())
@@ -172,10 +178,8 @@ def test_raw_password_is_rejected(tmp_path: Path) -> None:
             "host", payload("auth", name="Host", password=settings.server.host_password)
         )
 
-        assert sender.events_of_type("error")[-1].payload["msg"] == (
-            "'password_digest' must be a string"
-        )
-        assert not engine.players
+        assert not sender.events_of_type("error")
+        assert "host" in engine.players
 
     asyncio.run(run())
 

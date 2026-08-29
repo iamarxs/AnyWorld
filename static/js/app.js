@@ -438,9 +438,9 @@ function fallbackSha256(value) {
     }
     const encoded = unescape(encodeURIComponent(value));
     for (let index = 0; index < encoded.length; index += 1) {
-        words[index >> 2] |= encoded.charCodeAt(index) << ((3 - index) % 4) * 8;
+        words[index >> 2] |= encoded.charCodeAt(index) << (3 - (index % 4)) * 8;
     }
-    words[encoded.length >> 2] |= 0x80 << ((3 - encoded.length) % 4) * 8;
+    words[encoded.length >> 2] |= 0x80 << (3 - (encoded.length % 4)) * 8;
     words[((encoded.length + 8) >> 6) * 16 + 15] = encoded.length * 8;
     for (let block = 0; block < words.length; block += 16) {
         const schedule = words.slice(block, block + 16);
@@ -459,7 +459,7 @@ function fallbackSha256(value) {
                 + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
             hash.pop();
             hash.unshift((temp1 + temp2) | 0);
-            hash[4] = (hash[4] + temp1) | 0;
+            hash[4] = (hash[5] + temp1) | 0;
         }
         hash.forEach((valuePart, index) => { hash[index] = (valuePart + oldHash[index]) | 0; });
     }
@@ -490,10 +490,14 @@ elements.loginForm.addEventListener("submit", async (event) => {
     try {
         const auth = {
             name: elements.name.value.trim(),
+            password: elements.password.value,
             password_digest: await passwordDigest(elements.password.value),
         };
         if (send("auth", auth)) {
-            sessionStorage.setItem("artificialDungeonAuth", JSON.stringify(auth));
+            sessionStorage.setItem("artificialDungeonAuth", JSON.stringify({
+                name: auth.name,
+                password_digest: auth.password_digest,
+            }));
         }
     } catch (error) {
         showError(error.message);

@@ -29,11 +29,16 @@ class LobbyMixin:
 
     async def _authenticate(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         name = clean_text(data.get("name"), "name", 40)
-        password_digest = clean_text(data.get("password_digest"), "password_digest", 64)
-        if len(password_digest) != 64 or any(
-            char not in "0123456789abcdef" for char in password_digest
-        ):
-            raise ValueError("'password_digest' must be a lowercase SHA-256 digest")
+        password = data.get("password")
+        password_digest = data.get("password_digest")
+        if isinstance(password, str):
+            password_digest = hashlib.sha256(f"{password}{client_id}".encode()).hexdigest()
+        else:
+            password_digest = clean_text(password_digest, "password_digest", 64)
+            if len(password_digest) != 64 or any(
+                char not in "0123456789abcdef" for char in password_digest
+            ):
+                raise ValueError("'password_digest' must be a lowercase SHA-256 digest")
         error: str | None = None
         rejoined = False
         async with self.lock:
@@ -142,24 +147,10 @@ class LobbyMixin:
             if "positional" not in str(exc) and "argument" not in str(exc):
                 raise
             self.resolver.set_genesis(scenario)
-        try:
-            resolution = await self.resolver.generate_initial_state()
-        except LLMResolutionError as exc:
-            async with self.lock:
-                self.state = GameState.SCENARIO_INJECTION
-            LOGGER.exception("Scenario generation failed")
-            await self._send_error(client_id, str(exc))
-            return
-
         async with self.lock:
-            self.scenario_title = resolution.round_title or "Untitled Session"
-            self.current_scenario_state = resolution.global_narrative
+            self.scenario_title = "Untitled Session"
+            self.current_scenario_state = ""
             self.state = GameState.AWAITING_PLAYERS
-        initial_payload = resolution.model_dump()
-        initial_payload["original_scenario"] = scenario
-        await self.sender.broadcast_global(
-            ServerEvent(type="state_update", payload=initial_payload)
-        )
         await self.sender.send_personal(
             client_id,
             ServerEvent(type="scenario_ready", payload={"title": self.scenario_title}),
@@ -188,13 +179,28 @@ class LobbyMixin:
                 error = "The game cannot be started in the current state."
             else:
                 error = None
-                self.state = GameState.ACTIVE_TURN
-                directive = self._next_turn_locked()
-                initial_state = self.current_scenario_state or ""
+                self.state = GameState.AWAITING_LLM
+                player_names = [self.players[player_id].name for player_id in self.join_order]
                 title = self.scenario_title
         if error is not None:
             await self._send_error(client_id, error)
             return
+
+        try:
+            start_resolution = await self.resolver.generate_start_state(player_names)
+        except (LLMResolutionError, AttributeError) as exc:
+            LOGGER.exception("Player introduction generation failed")
+            async with self.lock:
+                self.state = GameState.AWAITING_PLAYERS
+            await self._send_error(client_id, f"Could not start game: {exc}")
+            return
+
+        async with self.lock:
+            self.scenario_title = start_resolution.round_title or "Untitled Session"
+            self.current_scenario_state = start_resolution.global_narrative
+            self.state = GameState.ACTIVE_TURN
+            directive = self._next_turn_locked()
+            initial_state = self.current_scenario_state
 
         try:
             await self.transcript.start(title, initial_state)
@@ -205,6 +211,9 @@ class LobbyMixin:
                 self.active_player_id = None
             await self._send_error(client_id, f"Could not create game transcript: {exc}")
             return
+        await self.sender.broadcast_global(
+            ServerEvent(type="state_update", payload=start_resolution.model_dump())
+        )
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": "The game has started."})
         )
