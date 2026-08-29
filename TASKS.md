@@ -2,11 +2,15 @@
 
 ## Active
 
+- [ ] Support multiple concurrent game sessions on one server instance (separate engines, ports, or session IDs)
+- [ ] Host reset: allow the host to clear all game state so players must re-authenticate and a new scenario can be created
+
 ## Waiting On
 
 ## Someday
 
 ## Done
+
 - [x] ~~Restrict dice rolls in system prompt to truly difficult/risky/absurd attempts only~~ (2026-08-28)
 - [x] ~~Use brighter player colors for the current turn and dim past rounds~~ (2026-08-28)
 - [x] ~~Fix "weaving the outcome" loading text scroll jump~~ (2026-08-28)

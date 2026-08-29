@@ -83,10 +83,20 @@ python app.py
 anyworld
 ```
 
-Open `http://localhost:4141/`. The first user enters the host password, creates the scenario,
-and waits for players using the player password before starting the game. Authentication sends a
-client-bound SHA-256 digest rather than the raw password; HTTPS/WSS is still recommended because a
-digest observed in transit can be replayed for that browser session.
+If the host is accessing the game on a local machine, they should open `http://localhost:4141/`.
+The first user enters the host password, creates the scenario, and waits for players using the
+player password before starting the game.
+
+Other players should connect using the IP of the host machine, either a LAN IP or a WAN IP, in
+which case a port forward should probably be configured in the host's router. It is recommended
+to remove the port forward after the game session, unless it is intended to leave the game running
+unsupervised.
+
+**Security note:** To maintain mobile browser compatibility, the initial login sends the raw
+password in plaintext rather than a client-bound digest. This is a deliberate trade-off favoring
+broad browser support over encrypted transport. When playing without HTTPS/WSS, the password is
+visible to anyone observing network traffic, so the server should not be left running unsupervised,
+especially if it is exposed to the internet. A solution for this is planned.
 
 Development reload is available with `python app.py --reload`.
 

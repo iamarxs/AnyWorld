@@ -61,8 +61,27 @@ class LLMContextManager:
             "role": "user",
             "content": (
                 "Create a concise scenario title and a vivid initial current-state paragraph "
-                "with at least one immediate opportunity, tension, or story hook players can "
-                "act on. Set player_resolutions to an empty object."
+                "with at least one immediate opportunity, tension, or story hook. Do not name, "
+                "describe, count, or otherwise establish the player characters or party; their "
+                "actual names are supplied only when the game starts. Set player_resolutions to "
+                "an empty object."
+            ),
+        }
+        return await self._request(prompt, RoundResolution, remember=True)
+
+    async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
+        """Introduce the joined players in the scenario when play begins."""
+        names = ", ".join(player_names)
+        prompt = {
+            "role": "user",
+            "content": (
+                "The game is now starting. Create a concise scenario title and rewrite the current "
+                "world state to introduce exactly "
+                "these player characters by their supplied names: "
+                f"{names}. Give each a brief scenario-appropriate occupation, class, role, or "
+                "other character description. Do not add, remove, or rename players, and do not "
+                "resolve any player actions yet. Keep the established scenario and immediate "
+                "story hook. Set player_resolutions to an empty object."
             ),
         }
         return await self._request(prompt, RoundResolution, remember=True)
