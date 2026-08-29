@@ -15,17 +15,17 @@ def test_settings_loads_typed_yaml(tmp_path: Path) -> None:
     config.write_text(
         """
 server:
-  host: "127.0.0.1"
-  port: 9000
-  host_password: "host"
-  player_password: "player"
-  max_players: 8
+    host: "127.0.0.1"
+    port: 9000
+    host_password: "host"
+    player_password: "player"
+    max_players: 8
 llm:
-  endpoint: "http://localhost:8080/v1"
-  api_key: "key"
-  context_window_size: 4096
-  model_name: "model"
-  system_prompt: "Direct the game."
+    endpoint: "http://localhost:8080/v1"
+    api_key: "key"
+    context_window_size: 4096
+    model_name: "model"
+    system_prompt: "Direct the game."
 """,
         encoding="utf-8",
     )
