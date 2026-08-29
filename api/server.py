@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -53,6 +54,17 @@ class ConnectionManager:
             *(self._send(client_id, websocket, event) for client_id, websocket in connections)
         )
 
+    async def broadcast_except(self, client_id: str, event: ServerEvent) -> None:
+        async with self._lock:
+            connections = [
+                (item_id, socket)
+                for item_id, socket in self.active_connections.items()
+                if item_id != client_id
+            ]
+        await asyncio.gather(
+            *(self._send(item_id, socket, event) for item_id, socket in connections)
+        )
+
     async def send_personal(self, client_id: str, event: ServerEvent) -> None:
         async with self._lock:
             websocket = self.active_connections.get(client_id)
@@ -73,7 +85,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 game_engine = GameEngine(manager, llm_manager)
-app = FastAPI(title="Artificial Dungeon")
+app = FastAPI(title="Anyworld")
 app.mount(
     "/static",
     StaticFiles(directory=PROJECT_ROOT / "static"),
@@ -89,6 +101,11 @@ async def get_index(request: Request) -> HTMLResponse:
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
+    try:
+        UUID(client_id)
+    except (ValueError, AttributeError):
+        await websocket.close(code=1008, reason="client_id must be a UUID")
+        return
     await manager.connect(client_id, websocket)
     try:
         while True:
