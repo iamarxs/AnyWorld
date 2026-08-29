@@ -2,14 +2,16 @@
 
 import asyncio
 import logging
-import re
 from collections import deque
 
-from core.schemas import ClientPayload, ServerEvent
+from core.schemas import ServerEvent
+from logic.dice import roll_d100
 from logic.llm_manager import LLMResolutionError
 from logic.lobby import LobbyMixin
 from logic.models import EventSender, GameState, Player, ResolutionManager
+from logic.presentation import name_resolution
 from logic.transcript import GameTranscript
+from logic.validation import clean_text
 
 LOGGER = logging.getLogger(__name__)
 IDLE_ACTION = "[SYSTEM INJECTION: Player disconnected. Idle.]"
@@ -17,6 +19,15 @@ IDLE_ACTION = "[SYSTEM INJECTION: Player disconnected. Idle.]"
 
 class GameEngine(LobbyMixin):
     """Single-session DFA whose mutations are serialized by an asyncio lock."""
+
+    PAYLOAD_HANDLERS = {
+        "auth": "_authenticate",
+        "chat": "_chat",
+        "scenario_init": "_initialize_scenario",
+        "start_game": "_start_game",
+        "end_game": "_end_game",
+        "action": "_submit_action",
+    }
 
     def __init__(self, sender: EventSender, resolver: ResolutionManager) -> None:
         self.sender = sender
@@ -34,19 +45,6 @@ class GameEngine(LobbyMixin):
         self.original_scenario: str | None = None
         self.current_scenario_state: str | None = None
         self.transcript = GameTranscript()
-
-    async def process_payload(self, client_id: str, payload: ClientPayload) -> None:
-        handlers = {
-            "auth": self._authenticate,
-            "chat": self._chat,
-            "scenario_init": self._initialize_scenario,
-            "start_game": self._start_game,
-            "action": self._submit_action,
-        }
-        try:
-            await handlers[payload.event_type](client_id, payload.data)
-        except ValueError as exc:
-            await self._send_error(client_id, str(exc))
 
     async def handle_disconnect(self, client_id: str) -> None:
         actions: dict[str, str] | None = None
@@ -79,7 +77,7 @@ class GameEngine(LobbyMixin):
             await self._resolve_round(actions)
 
     async def _submit_action(self, client_id: str, data: dict[str, object]) -> None:
-        action = self._clean_text(data.get("action"), "action", 4_000)
+        action = clean_text(data.get("action"), "action", 4_000)
         directive: ServerEvent | None = None
         action_event: ServerEvent | None = None
         actions: dict[str, str] | None = None
@@ -186,8 +184,25 @@ class GameEngine(LobbyMixin):
                 status_notes.append("[SYSTEM: Explain this player's in-world return.]")
             llm_actions[name] = " ".join([*status_notes, actions[client_id]])
 
+        dice_results: dict[str, int] = {}
+        hidden_rolls: set[str] = set()
+        plan_dice = getattr(self.resolver, "plan_dice", None)
+        if plan_dice is not None:
+            try:
+                dice_plan = await plan_dice(llm_actions)
+                hidden_rolls = set(dice_plan.hidden_rolls)
+                dice_results = {
+                    name: roll_d100()
+                    for name, required in dice_plan.rolls.items()
+                    if required and name in llm_actions
+                }
+            except LLMResolutionError:
+                LOGGER.exception("Dice planning failed; resolving without rolls")
         try:
-            resolution = await self.resolver.generate_resolution(llm_actions)
+            if plan_dice is None:
+                resolution = await self.resolver.generate_resolution(llm_actions)
+            else:
+                resolution = await self.resolver.generate_resolution(llm_actions, dice_results)
         except LLMResolutionError as exc:
             LOGGER.exception("Round resolution failed")
             async with self.lock:
@@ -204,6 +219,14 @@ class GameEngine(LobbyMixin):
                 await self.sender.broadcast_global(directive)
             return
 
+        async with self.lock:
+            game_ended = self.state is GameState.ENDED
+        if game_ended:
+            await self.sender.broadcast_global(
+                ServerEvent(type="dm_thinking", payload={"active": False})
+            )
+            return
+
         display_actions = {
             name: actions[client_id] for client_id, (name, _, _) in participant_data.items()
         }
@@ -213,7 +236,7 @@ class GameEngine(LobbyMixin):
                 name,
                 resolution.player_resolutions.get(client_id, "No resolution was provided."),
             )
-            player_resolutions[name] = self._name_resolution(name, result)
+            player_resolutions[name] = name_resolution(name, result)
         display_resolution = resolution.model_copy(
             update={"round_title": None, "player_resolutions": player_resolutions}
         )
@@ -232,7 +255,15 @@ class GameEngine(LobbyMixin):
             directive = self._next_turn_locked()
         try:
             await self.transcript.append_round(
-                round_number, previous_state, display_actions, display_resolution
+                round_number,
+                previous_state,
+                display_actions,
+                display_resolution,
+                {
+                    name: value
+                    for name, value in dice_results.items()
+                    if name not in hidden_rolls
+                },
             )
         except OSError:
             LOGGER.exception("Could not append round %s to transcript", round_number)
@@ -244,50 +275,35 @@ class GameEngine(LobbyMixin):
         state_payload["player_order"] = [
             self.players[client_id].name for client_id in self.join_order
         ]
+        state_payload["dice_results"] = {
+            name: value for name, value in dice_results.items() if name not in hidden_rolls
+        }
         await self.sender.broadcast_global(
             ServerEvent(type="dm_thinking", payload={"active": False})
         )
         await self.sender.broadcast_global(ServerEvent(type="state_update", payload=state_payload))
+        host_id = next(
+            (client_id for client_id in self.join_order if self.players[client_id].is_host), None
+        )
+        token_usage = getattr(self.resolver, "last_token_usage", None)
+        if host_id is not None and token_usage is not None:
+            await self.sender.send_personal(
+                host_id,
+                ServerEvent(
+                    type="token_usage",
+                    payload={
+                        "approximate_tokens": token_usage,
+                        "context_window_size": getattr(self.resolver, "context_window_size", 4_096),
+                    },
+                ),
+            )
         if directive is not None:
             await self.sender.broadcast_global(
                 ServerEvent(type="round_start", payload={"round_number": round_number + 1})
             )
             await self.sender.broadcast_global(directive)
 
-    @staticmethod
-    def _name_resolution(name: str, result: str) -> str:
-        """Ensure every per-player outcome explicitly identifies its player."""
-        named_result = re.sub(
-            r"^(?:the\s+|your\s+)?character\b", name, result, count=1, flags=re.IGNORECASE
-        )
-        named_result = re.sub(
-            r"^(?:they|he|she)\b", name, named_result, count=1, flags=re.IGNORECASE
-        )
-        if name.casefold() not in named_result.casefold():
-            return f"{name}: {named_result}"
-        return named_result
-
     async def _send_error(self, client_id: str, message: str) -> None:
         await self.sender.send_personal(
             client_id, ServerEvent(type="error", payload={"msg": message})
         )
-
-    @staticmethod
-    def _clean_optional_text(value: object, field: str, maximum: int) -> str:
-        if value is None:
-            return ""
-        if not isinstance(value, str):
-            raise ValueError(f"'{field}' must be a string")
-        cleaned = value.strip()
-        if len(cleaned) > maximum:
-            raise ValueError(f"'{field}' must contain at most {maximum} characters")
-        return cleaned
-
-    @staticmethod
-    def _clean_text(value: object, field: str, maximum: int) -> str:
-        if not isinstance(value, str):
-            raise ValueError(f"'{field}' must be a string")
-        cleaned = value.strip()
-        if not cleaned or len(cleaned) > maximum:
-            raise ValueError(f"'{field}' must contain 1-{maximum} characters")
-        return cleaned
