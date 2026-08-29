@@ -4,8 +4,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Artificial Dungeon</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=6">
+  <title>Anyworld</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=8">
+  <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+  <link rel="manifest" href="/static/favicon/site.webmanifest" />
 </head>
 
 <body>
@@ -23,17 +28,13 @@
     </section>
     <header id="title-pane">
       <span id="scenario-title">Awaiting scenario initialization...</span>
+      <span id="token-usage" hidden aria-label="Approximate token usage"><span id="token-chart" role="img" aria-label="Token usage chart"></span><span id="token-count"></span></span>
       <span id="player-identity" aria-label="Current player"></span>
     </header>
     <section id="state-pane" data-pane-title="Scenario status" aria-label="Scenario status" aria-live="polite">
     </section>
     <section id="log-pane" data-pane-title="Player round actions" aria-label="Player round actions and resolutions"
-      aria-live="polite">
-      <div id="dm-thinking" hidden role="status">
-        <span class="thinking-orb" aria-hidden="true"></span>
-        The Dungeon Master is weaving the outcome…
-      </div>
-    </section>
+      aria-live="polite"></section>
     <form id="input-pane">
       <input type="text" id="action-input" maxlength="4000" disabled autocomplete="off"
         placeholder="Waiting for your turn..." aria-label="Your character action">
@@ -42,7 +43,7 @@
 
   <div id="login-modal" class="modal" role="dialog" aria-modal="true">
     <form id="login-form" class="modal-card">
-      <h1>Artificial Dungeon</h1>
+      <h1>Anyworld</h1>
       <p>The first user must enter the host password. Other users join afterward.</p>
       <label for="name-input">Player name</label>
       <input id="name-input" maxlength="40" required autocomplete="nickname">
@@ -75,6 +76,11 @@
     </div>
   </div>
 
+  <div id="dm-thinking" hidden role="status">
+    <span class="thinking-orb" aria-hidden="true"></span>
+    The Dungeon Master is weaving the outcome…
+  </div>
+  <button id="end-game-button" type="button" hidden>End game</button>
   <div id="connection-status" role="status">Connecting...</div>
   <script src="/static/js/app.js?v=5"></script>
 </body>
