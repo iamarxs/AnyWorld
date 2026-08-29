@@ -12,7 +12,7 @@ class StrictModel(BaseModel):
 
 
 class ClientPayload(StrictModel):
-    event_type: Literal["auth", "chat", "action", "scenario_init", "start_game"]
+    event_type: Literal["auth", "chat", "action", "scenario_init", "start_game", "end_game"]
     data: dict[str, Any]
 
 
@@ -29,8 +29,26 @@ class ServerEvent(StrictModel):
         "action_echo",
         "player_roster",
         "dm_thinking",
+        "game_ended",
+        "token_usage",
     ]
     payload: dict[str, Any]
+
+
+class DicePlan(StrictModel):
+    """LLM-selected checks; hidden names are never disclosed to clients."""
+
+    rolls: dict[str, bool]
+    hidden_rolls: list[str]
+
+
+class ContextSummary(StrictModel):
+    """Structured memory retained after older round history is compacted."""
+
+    world_state: str
+    player_states: dict[str, str]
+    important_npcs: str
+    unresolved_threads: list[str]
 
 
 class RoundResolution(StrictModel):
