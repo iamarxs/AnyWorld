@@ -1,13 +1,15 @@
 """Authentication, scenario creation, chat, and lobby transitions."""
 
+import hashlib
 import hmac
 import logging
 from typing import TYPE_CHECKING
 
 from core.config import settings
-from core.schemas import ServerEvent
+from core.schemas import ClientPayload, ServerEvent
 from logic.llm_manager import LLMResolutionError
 from logic.models import GameState, Player
+from logic.validation import clean_optional_text, clean_text
 
 if TYPE_CHECKING:
     from logic.engine import GameEngine
@@ -18,9 +20,20 @@ LOGGER = logging.getLogger(__name__)
 class LobbyMixin:
     """Lobby operations mixed into GameEngine to keep modules focused."""
 
+    async def process_payload(self: "GameEngine", client_id: str, payload: ClientPayload) -> None:
+        try:
+            handler = getattr(self, self.PAYLOAD_HANDLERS[payload.event_type])
+            await handler(client_id, payload.data)
+        except ValueError as exc:
+            await self._send_error(client_id, str(exc))
+
     async def _authenticate(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
-        name = self._clean_text(data.get("name"), "name", 40)
-        password = self._clean_text(data.get("password"), "password", 200)
+        name = clean_text(data.get("name"), "name", 40)
+        password_digest = clean_text(data.get("password_digest"), "password_digest", 64)
+        if len(password_digest) != 64 or any(
+            char not in "0123456789abcdef" for char in password_digest
+        ):
+            raise ValueError("'password_digest' must be a lowercase SHA-256 digest")
         error: str | None = None
         rejoined = False
         async with self.lock:
@@ -31,7 +44,7 @@ class LobbyMixin:
                     if existing.is_host
                     else settings.server.player_password
                 )
-                if not hmac.compare_digest(password, expected):
+                if not self._password_matches(password_digest, expected, client_id):
                     error = "Invalid password for this session."
                 else:
                     existing.is_connected = True
@@ -40,7 +53,9 @@ class LobbyMixin:
                     name = existing.name
                     rejoined = True
             elif self.state is GameState.AWAITING_HOST:
-                if not hmac.compare_digest(password, settings.server.host_password):
+                if not self._password_matches(
+                    password_digest, settings.server.host_password, client_id
+                ):
                     error = "The host must join first with the host password."
                 else:
                     player = Player(client_id, name, True, join_index=len(self.join_order))
@@ -53,7 +68,9 @@ class LobbyMixin:
                 GameState.AWAITING_PLAYERS,
             }:
                 error = "The game has already started."
-            elif not hmac.compare_digest(password, settings.server.player_password):
+            elif not self._password_matches(
+                password_digest, settings.server.player_password, client_id
+            ):
                 error = "Invalid player password."
             elif self.state is GameState.SCENARIO_INJECTION:
                 error = "The host is still creating the scenario."
@@ -79,10 +96,15 @@ class LobbyMixin:
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": f"{name} {verb}."})
         )
-        await self.sender.broadcast_global(self._player_roster_event())
+        await self.sender.broadcast_except(client_id, self._player_roster_event())
+
+    @staticmethod
+    def _password_matches(digest: str, password: str, client_id: str) -> bool:
+        expected = hashlib.sha256(f"{password}{client_id}".encode()).hexdigest()
+        return hmac.compare_digest(digest, expected)
 
     async def _chat(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
-        message = self._clean_text(data.get("message"), "message", 1_000)
+        message = clean_text(data.get("message"), "message", 1_000)
         async with self.lock:
             player = self.players.get(client_id)
         if player is None or not player.is_connected:
@@ -95,8 +117,8 @@ class LobbyMixin:
     async def _initialize_scenario(
         self: "GameEngine", client_id: str, data: dict[str, object]
     ) -> None:
-        scenario = self._clean_text(data.get("scenario"), "scenario", 20_000)
-        guidance = self._clean_optional_text(data.get("guidance"), "guidance", 5_000)
+        scenario = clean_text(data.get("scenario"), "scenario", 20_000)
+        guidance = clean_optional_text(data.get("guidance"), "guidance", 5_000)
         async with self.lock:
             player = self.players.get(client_id)
             if player is None or not player.is_host:
@@ -142,6 +164,18 @@ class LobbyMixin:
             client_id,
             ServerEvent(type="scenario_ready", payload={"title": self.scenario_title}),
         )
+        token_usage = getattr(self.resolver, "last_token_usage", None)
+        if token_usage is not None:
+            await self.sender.send_personal(
+                client_id,
+                ServerEvent(
+                    type="token_usage",
+                    payload={
+                        "approximate_tokens": token_usage,
+                        "context_window_size": getattr(self.resolver, "context_window_size", 8_192),
+                    },
+                ),
+            )
 
     async def _start_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         del data
@@ -179,6 +213,29 @@ class LobbyMixin:
         )
         if directive is not None:
             await self.sender.broadcast_global(directive)
+
+    async def _end_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
+        del data
+        async with self.lock:
+            player = self.players.get(client_id)
+            if player is None or not player.is_host:
+                error = "Only the host can end the game."
+            elif self.state not in {GameState.ACTIVE_TURN, GameState.AWAITING_LLM}:
+                error = "The game cannot be ended in the current state."
+            else:
+                error = None
+                self.state = GameState.ENDED
+                self.active_player_id = None
+        if error is not None:
+            await self._send_error(client_id, error)
+            return
+        try:
+            await self.transcript.finalize()
+        except OSError:
+            LOGGER.exception("Could not finalize game transcript")
+        await self.sender.broadcast_global(
+            ServerEvent(type="game_ended", payload={"msg": "The host ended the game."})
+        )
 
     def _player_roster_event(self: "GameEngine") -> ServerEvent:
         return ServerEvent(

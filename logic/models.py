@@ -13,6 +13,7 @@ class GameState(Enum):
     SCENARIO_INJECTION = auto()
     ACTIVE_TURN = auto()
     AWAITING_LLM = auto()
+    ENDED = auto()
 
 
 @dataclass(slots=True)
@@ -31,10 +32,14 @@ class EventSender(Protocol):
 
     async def send_personal(self, client_id: str, event: ServerEvent) -> None: ...
 
+    async def broadcast_except(self, client_id: str, event: ServerEvent) -> None: ...
+
 
 class ResolutionManager(Protocol):
     def set_genesis(self, scenario: str, guidance: str = "") -> None: ...
 
     async def generate_initial_state(self) -> RoundResolution: ...
 
-    async def generate_resolution(self, round_buffer: dict[str, str]) -> RoundResolution: ...
+    async def generate_resolution(
+        self, round_buffer: dict[str, str], dice_results: dict[str, int] | None = None
+    ) -> RoundResolution: ...
