@@ -9,14 +9,15 @@
     --accent-bright: #83c3df;
     --action-accent: #b49acb;
     --error: #e47d7d;
-    --player-0: #5f95c4;
-    --player-1: #c08a5e;
-    --player-2: #5aa06a;
-    --player-3: #c4726c;
-    --player-4: #a68ac4;
-    --player-5: #b3a05e;
-    --player-6: #7fa3c9;
-    --player-7: #b96f9c;
+    /* Bright colors are used by the active round; past rounds are dimmed below. */
+    --player-0: #79c0ff;
+    --player-1: #ffa657;
+    --player-2: #56d364;
+    --player-3: #ff7b72;
+    --player-4: #d2a8ff;
+    --player-5: #f2cc60;
+    --player-6: #a5d6ff;
+    --player-7: #ff9bce;
 }
 * {
     box-sizing: border-box;
@@ -127,6 +128,23 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+#token-usage {
+    position: absolute;
+    left: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+#token-chart {
+    width: 1.15rem;
+    height: 1.15rem;
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) 0deg, var(--accent) 0deg, var(--border) 0deg);
 }
 #player-identity {
     position: absolute;
@@ -318,10 +336,14 @@ button:disabled {
     color: var(--error);
 }
 #dm-thinking {
+    position: fixed;
+    z-index: 8;
+    right: 1rem;
+    bottom: 3.5rem;
     display: flex;
     align-items: center;
     gap: 0.7rem;
-    margin: 1rem 0;
+    margin: 0;
     padding: 0.8rem 1rem;
     border: 1px solid var(--border);
     border-radius: 0.5rem;
@@ -338,6 +360,25 @@ button:disabled {
 @keyframes pulse {
     50% { opacity: 0.3; transform: scale(0.65); }
 }
+#end-game-button {
+    position: fixed;
+    z-index: 7;
+    right: 0.6rem;
+    top: 2.4rem;
+    border-color: rgb(228 125 125 / 55%);
+    color: var(--error);
+}
+#state-pane > :not(.current-state):not(.original-scenario),
+#log-pane > :not(.current-round):not(.latest-complete-round) {
+    opacity: 0.48;
+}
+#state-pane > .original-scenario,
+#state-pane > .current-state,
+#log-pane > .current-round,
+#log-pane > .latest-complete-round {
+    opacity: 1 !important;
+}
+.dice-entry { margin: 0 0 0.7rem; font-weight: bold; }
 #connection-status {
     position: fixed;
     right: 0.5rem;
