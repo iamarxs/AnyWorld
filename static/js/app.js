@@ -17,7 +17,12 @@ function createClientId() {
         const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
         return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
     }
-    return `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const randomHex = () => Math.floor(Math.random() * 16).toString(16);
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+        const value = character === "x" ? Number.parseInt(randomHex(), 16) :
+            (Number.parseInt(randomHex(), 16) & 0x3) | 0x8;
+        return value.toString(16);
+    });
 }
 
 const clientId = storedId || createClientId();
@@ -26,12 +31,10 @@ sessionStorage.setItem("artificialDungeonClientId", clientId);
 const socketScheme = window.location.protocol === "https:" ? "wss" : "ws";
 // WAN routes and reverse proxies can drop an initial handshake. Retry the socket
 // without requiring the user to reload the login page manually.
-let ws = new WebSocket(`${socketScheme}://${window.location.host}/ws/${clientId}`);
-let connectionTimer = setTimeout(() => {
-    if (ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-    }
-}, 10000);
+let ws;
+let connectionTimer;
+let reconnectAttempts = 0;
+let reconnectTimer;
 
 const elements = {
     grid: document.getElementById("grid-container"),
@@ -60,6 +63,10 @@ const elements = {
     actionInput: document.getElementById("action-input"),
     dmThinking: document.getElementById("dm-thinking"),
     connectionStatus: document.getElementById("connection-status"),
+    tokenUsage: document.getElementById("token-usage"),
+    tokenChart: document.getElementById("token-chart"),
+    tokenCount: document.getElementById("token-count"),
+    endGameButton: document.getElementById("end-game-button"),
 };
 
 let authenticated = false;
@@ -67,6 +74,9 @@ let isHost = false;
 let lastStartedRound = 0;
 const renderedActions = new Set();
 const playerColors = new Map();
+const MAX_LOG_ENTRIES = 500;
+const MAX_STATE_ENTRIES = 100;
+const MAX_CHAT_ENTRIES = 300;
 
 function send(eventType, data) {
     if (ws.readyState !== WebSocket.OPEN) {
@@ -77,12 +87,24 @@ function send(eventType, data) {
     return true;
 }
 
-function appendText(container, text, className) {
+function trimContainer(container, maximum) {
+    while (container.children.length > maximum) {
+        const removed = container.firstElementChild;
+        if (removed && removed.dataset.actionKey) {
+            renderedActions.delete(removed.dataset.actionKey);
+        }
+        removed?.remove();
+    }
+}
+
+function appendText(container, text, className, maximum = MAX_LOG_ENTRIES) {
     const entry = document.createElement("p");
     entry.className = className;
     entry.textContent = text;
     container.appendChild(entry);
+    trimContainer(container, maximum);
     container.scrollTop = container.scrollHeight;
+    return entry;
 }
 
 function startRound(roundNumber) {
@@ -90,7 +112,19 @@ function startRound(roundNumber) {
         return;
     }
     lastStartedRound = roundNumber;
-    appendText(elements.log, `Round ${roundNumber}:`, "round-heading");
+    elements.log.querySelectorAll(".current-round").forEach((entry) => {
+        entry.classList.remove("current-round");
+    });
+    appendText(elements.log, `Round ${roundNumber}:`, "round-heading current-round");
+}
+
+function markRoundComplete() {
+    elements.log.querySelectorAll(".latest-complete-round").forEach((entry) => {
+        entry.classList.remove("latest-complete-round");
+    });
+    elements.log.querySelectorAll(".current-round").forEach((entry) => {
+        entry.classList.add("latest-complete-round");
+    });
 }
 
 function setPlayerOrder(playerOrder = []) {
@@ -118,10 +152,6 @@ function renderPlayers(players = []) {
 
 function setThinking(active) {
     elements.dmThinking.hidden = !active;
-    elements.log.classList.toggle("is-thinking", active);
-    if (active) {
-        elements.dmThinking.scrollIntoView({ block: "end", behavior: "smooth" });
-    }
 }
 
 function playerColorClass(playerName) {
@@ -139,11 +169,12 @@ function showAction(roundNumber, playerName, action, colorIndex = null) {
     }
     renderedActions.add(actionKey);
     startRound(roundNumber);
-    appendText(
+    const entry = appendText(
         elements.log,
         `${playerName} attempts: ${action}`,
-        `action-entry${playerColorClass(playerName)}`,
+        `action-entry current-round${playerColorClass(playerName)}`,
     );
+    entry.dataset.actionKey = actionKey;
 }
 
 function syncActions(roundNumber, submittedActions = {}) {
@@ -183,6 +214,7 @@ function appendState(text, roundNumber = null) {
 
     entry.append(label, narrative);
     elements.state.appendChild(entry);
+    trimContainer(elements.state, MAX_STATE_ENTRIES);
     elements.state.scrollTop = elements.state.scrollHeight;
 }
 
@@ -190,7 +222,12 @@ function showError(message) {
     if (!authenticated) {
         elements.loginError.textContent = message;
     } else {
-        appendText(elements.chatMessages, `Error: ${message}`, "chat-entry error");
+        appendText(
+            elements.chatMessages,
+            `Error: ${message}`,
+            "chat-entry error",
+            MAX_CHAT_ENTRIES,
+        );
     }
 }
 
@@ -237,6 +274,7 @@ function applySnapshot(payload) {
         applyTurn(payload.active_player_id, payload.active_player_name);
     }
     showHostStep(payload.state);
+    elements.endGameButton.hidden = !isHost || !["ACTIVE_TURN", "AWAITING_LLM"].includes(payload.state);
 }
 
 function handleMessage(message) {
@@ -275,24 +313,59 @@ function handleMessage(message) {
             appendScenario(payload.original_scenario);
         }
         appendState(payload.global_narrative, payload.round_number);
+        Object.entries(payload.dice_results || {}).forEach(([player, roll]) => {
+            appendText(
+                elements.log,
+                `🎲 ${player} rolled ${roll}/100`,
+                `dice-entry current-round${playerColorClass(player)}`,
+            );
+        });
         Object.entries(payload.player_resolutions).forEach(([player, resolution]) => {
             appendText(
                 elements.log,
                 `[${player}] ${resolution}`,
-                `resolution-entry${playerColorClass(player)}`,
+                `resolution-entry current-round${playerColorClass(player)}`,
             );
         });
+        markRoundComplete();
     } else if (type === "player_roster") {
         renderPlayers(payload.players);
     } else if (type === "dm_thinking") {
         setThinking(Boolean(payload.active));
     } else if (type === "chat_echo") {
-        appendText(elements.chatMessages, `${payload.name}: ${payload.chat}`, "chat-entry");
+        appendText(
+            elements.chatMessages,
+            `${payload.name}: ${payload.chat}`,
+            "chat-entry",
+            MAX_CHAT_ENTRIES,
+        );
     } else if (type === "system_msg") {
-        appendText(elements.chatMessages, `System: ${payload.msg}`, "chat-entry");
+        appendText(
+            elements.chatMessages,
+            `System: ${payload.msg}`,
+            "chat-entry",
+            MAX_CHAT_ENTRIES,
+        );
         if (payload.msg === "The game has started.") {
             elements.hostModal.hidden = true;
         }
+    } else if (type === "token_usage") {
+        elements.tokenUsage.hidden = false;
+        const used = Math.max(0, Number(payload.approximate_tokens) || 0);
+        const limit = Math.max(1, Number(payload.context_window_size) || used || 1);
+        const ratio = Math.min(1, used / limit);
+        elements.tokenChart.style.background =
+            `conic-gradient(var(--accent) ${ratio * 360}deg, var(--border) ${ratio * 360}deg)`;
+        elements.tokenChart.setAttribute(
+            "aria-label",
+            `Token usage: ${used.toLocaleString()} of ${limit.toLocaleString()}`,
+        );
+        elements.tokenCount.textContent = `≈ ${used.toLocaleString()} / ${limit.toLocaleString()} tokens`;
+    } else if (type === "game_ended") {
+        setThinking(false);
+        elements.actionInput.disabled = true;
+        elements.endGameButton.hidden = true;
+        appendText(elements.chatMessages, `System: ${payload.msg}`, "chat-entry", MAX_CHAT_ENTRIES);
     } else if (type === "scenario_ready") {
         elements.hostStatus.textContent = `“${payload.title}” is ready.`;
         elements.scenarioStep.hidden = true;
@@ -305,38 +378,126 @@ function handleMessage(message) {
     }
 }
 
-ws.addEventListener("open", () => {
-    clearTimeout(connectionTimer);
-    elements.connectionStatus.textContent = "Connected";
-});
+function connectSocket() {
+    clearTimeout(reconnectTimer);
+    ws = new WebSocket(`${socketScheme}://${window.location.host}/ws/${clientId}`);
+    connectionTimer = window.setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) ws.close();
+    }, 10000);
+    ws.addEventListener("open", () => {
+        clearTimeout(connectionTimer);
+        reconnectAttempts = 0;
+        elements.connectionStatus.textContent = "Connected";
+        elements.chatInput.disabled = false;
+        const savedAuth = sessionStorage.getItem("artificialDungeonAuth");
+        if (savedAuth && !authenticated) {
+            ws.send(JSON.stringify({ event_type: "auth", data: JSON.parse(savedAuth) }));
+        }
+    });
+    ws.addEventListener("message", (event) => {
+        try {
+            handleMessage(JSON.parse(event.data));
+        } catch (error) {
+            console.error("Invalid server message", error);
+            showError("Received an invalid server message.");
+        }
+    });
+    ws.addEventListener("close", () => {
+        authenticated = false;
+        elements.connectionStatus.textContent = "Reconnecting...";
+        elements.actionInput.disabled = true;
+        elements.chatInput.disabled = true;
+        const delay = Math.min(1000 * (2 ** reconnectAttempts), 15000);
+        reconnectAttempts += 1;
+        reconnectTimer = window.setTimeout(connectSocket, delay);
+    });
+    ws.addEventListener("error", () => {
+        elements.connectionStatus.textContent = "Connection error";
+    });
+}
 
-ws.addEventListener("message", (event) => {
-    try {
-        handleMessage(JSON.parse(event.data));
-    } catch (error) {
-        console.error("Invalid server message", error);
-        showError("Received an invalid server message.");
+connectSocket();
+
+function fallbackSha256(value) {
+    const rightRotate = (word, amount) => (word >>> amount) | (word << (32 - amount));
+    const maxWord = 2 ** 32;
+    const words = [];
+    const hash = [];
+    const constants = [];
+    const composite = {};
+    let primeCounter = 0;
+    for (let candidate = 2; primeCounter < 64; candidate += 1) {
+        if (!composite[candidate]) {
+            for (let multiple = candidate * candidate; multiple < 313; multiple += candidate) {
+                composite[multiple] = true;
+            }
+            if (primeCounter < 8) hash[primeCounter] = (candidate ** 0.5 * maxWord) | 0;
+            constants[primeCounter] = (candidate ** (1 / 3) * maxWord) | 0;
+            primeCounter += 1;
+        }
     }
-});
+    const encoded = unescape(encodeURIComponent(value));
+    for (let index = 0; index < encoded.length; index += 1) {
+        words[index >> 2] |= encoded.charCodeAt(index) << ((3 - index) % 4) * 8;
+    }
+    words[encoded.length >> 2] |= 0x80 << ((3 - encoded.length) % 4) * 8;
+    words[((encoded.length + 8) >> 6) * 16 + 15] = encoded.length * 8;
+    for (let block = 0; block < words.length; block += 16) {
+        const schedule = words.slice(block, block + 16);
+        const oldHash = hash.slice();
+        for (let index = 0; index < 64; index += 1) {
+            const w15 = schedule[index - 15];
+            const w2 = schedule[index - 2];
+            const a = hash[0];
+            const e = hash[4];
+            const temp1 = hash[7] + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+                + ((e & hash[5]) ^ (~e & hash[6])) + constants[index]
+                + (schedule[index] = index < 16 ? schedule[index] :
+                    (schedule[index - 16] + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+                    + schedule[index - 7] + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+            const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+                + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+            hash.pop();
+            hash.unshift((temp1 + temp2) | 0);
+            hash[4] = (hash[4] + temp1) | 0;
+        }
+        hash.forEach((valuePart, index) => { hash[index] = (valuePart + oldHash[index]) | 0; });
+    }
+    return hash.map((word) => (word >>> 0).toString(16).padStart(8, "0")).join("");
+}
 
-ws.addEventListener("close", () => {
-    elements.connectionStatus.textContent = "Reconnecting...";
-    elements.actionInput.disabled = true;
-    elements.chatInput.disabled = true;
-    window.setTimeout(() => window.location.reload(), 1500);
-});
+async function passwordDigest(password) {
+    const value = password + clientId;
+    // Some mobile browsers expose crypto.subtle but reject it on an insecure HTTP
+    // origin. Fall back if the digest operation itself is unavailable or rejected.
+    if (window.crypto?.subtle && window.TextEncoder) {
+        try {
+            const bytes = new TextEncoder().encode(value);
+            const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+            return Array.from(new Uint8Array(digest), (byte) =>
+                byte.toString(16).padStart(2, "0"),
+            ).join("");
+        } catch (error) {
+            console.warn("Web Crypto SHA-256 unavailable; using fallback", error);
+        }
+    }
+    return fallbackSha256(value);
+}
 
-ws.addEventListener("error", () => {
-    elements.connectionStatus.textContent = "Connection error";
-});
-
-elements.loginForm.addEventListener("submit", (event) => {
+elements.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     elements.loginError.textContent = "";
-    send("auth", {
-        name: elements.name.value.trim(),
-        password: elements.password.value,
-    });
+    try {
+        const auth = {
+            name: elements.name.value.trim(),
+            password_digest: await passwordDigest(elements.password.value),
+        };
+        if (send("auth", auth)) {
+            sessionStorage.setItem("artificialDungeonAuth", JSON.stringify(auth));
+        }
+    } catch (error) {
+        showError(error.message);
+    }
 });
 
 elements.scenarioForm.addEventListener("submit", (event) => {
@@ -349,6 +510,12 @@ elements.scenarioForm.addEventListener("submit", (event) => {
     ) {
         elements.scenarioForm.querySelector("button").disabled = true;
         elements.hostStatus.textContent = "Generating the scenario...";
+    }
+});
+
+elements.endGameButton.addEventListener("click", () => {
+    if (window.confirm("End this game for every player?")) {
+        send("end_game", {});
     }
 });
 
