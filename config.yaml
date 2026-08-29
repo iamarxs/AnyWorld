@@ -1,14 +1,19 @@
 server:
   host: "0.0.0.0"
   port: 4141
-  host_password: "admin"
-  player_password: "play"
-  max_players: 4
+  host_password: null
+  player_password: null
+  max_players: 6
 llm:
+  provider: "compatible" # use "openai" for the direct OpenAI API
   endpoint: "http://localhost:8033/v1"
   api_key: "sk-no-key-required"
-  context_window_size: 128000
-  tokenizer_encoding: "cl100k_base"
+
+  # Fallback value; successful llama.cpp auto-detection takes precedence.
+  # llama.cpp should allow for auto-detection, but since OpenAI does not, find out the context
+  # window of the model you are using, and set this to a slightly lower value to be safe.
+  context_window_size: 8192
+  tokenizer_encoding: "cl100k_base" # set to null if token estimates look wrong or the app errors on this
   model_name: "local"
   system_prompt: |
     You are the Dungeon Master, world simulator, and rules arbiter for a multiplayer text
@@ -37,6 +42,12 @@ llm:
     for absent players. System annotations about a departure or return are authoritative:
     provide one plausible in-world explanation for the transition, then stop producing
     outcomes while that player is absent.
+
+    Dice rolls should be rare and reserved for attempts that are truly difficult, risky, or
+    absurd. Do not roll for straightforward actions (e.g., "walk forward", "open the door",
+    "draw your sword"). Roll only when the outcome is genuinely uncertain because of the
+    world state, opposition, danger, or meaningful consequences. Never force a dice roll as a
+    default for every action.
 
     During scenario initialization, create a concise title. global_narrative must describe
     the resulting shared world state after all outcomes. Return only the requested structured
