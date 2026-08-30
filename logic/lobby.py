@@ -29,16 +29,11 @@ class LobbyMixin:
 
     async def _authenticate(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         name = clean_text(data.get("name"), "name", 40)
-        password = data.get("password")
-        password_digest = data.get("password_digest")
-        if isinstance(password, str):
-            password_digest = hashlib.sha256(f"{password}{client_id}".encode()).hexdigest()
-        else:
-            password_digest = clean_text(password_digest, "password_digest", 64)
-            if len(password_digest) != 64 or any(
-                char not in "0123456789abcdef" for char in password_digest
-            ):
-                raise ValueError("'password_digest' must be a lowercase SHA-256 digest")
+        password_digest = clean_text(data.get("password_digest"), "password_digest", 64)
+        if len(password_digest) != 64 or any(
+            char not in "0123456789abcdef" for char in password_digest
+        ):
+            raise ValueError("'password_digest' must be a lowercase SHA-256 digest")
         error: str | None = None
         rejoined = False
         async with self.lock:

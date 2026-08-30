@@ -5,3 +5,6 @@ __pycache__/
 .coverage
 .logged_games/
 .pi/
+certs/
+pytest-output.txt
+IMPLEMENTATION_STATUS.md

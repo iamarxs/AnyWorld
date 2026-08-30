@@ -7,6 +7,7 @@ import sys
 import uvicorn
 
 from core.config import settings
+from api.tls_bootstrap import ensure_cert
 
 
 def main() -> None:
@@ -30,12 +31,15 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    logging.info("Launching Anyworld on %s:%s", args.host, args.port)
+    ip, cert_path, key_path = ensure_cert()
+    logging.info("Launching Anyworld on %s:%s (%s:%s)", args.host, args.port, ip, args.port)
     uvicorn.run(
         "api.server:app",
         host=args.host,
         port=args.port,
         reload=args.reload,
+        ssl_certfile=cert_path,
+        ssl_keyfile=key_path,
         # Keep idle WAN WebSocket connections alive through NAT/proxies.
         ws_ping_interval=20,
         ws_ping_timeout=20,

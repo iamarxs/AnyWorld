@@ -490,7 +490,6 @@ elements.loginForm.addEventListener("submit", async (event) => {
     try {
         const auth = {
             name: elements.name.value.trim(),
-            password: elements.password.value,
             password_digest: await passwordDigest(elements.password.value),
         };
         if (send("auth", auth)) {
