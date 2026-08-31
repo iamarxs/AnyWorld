@@ -10,11 +10,11 @@ import uvicorn
 from core.config import settings
 from api.tls_bootstrap import ensure_cert
 
-_RESPONSE_STATUS = re.compile(r'"[^"]*(\d{3}) [^"]*"\s*$')
+_RESPONSE_STATUS = re.compile(r'(\d{3})(?:\s+\w+)?\s*"?\s*$')
 
 
 class _NonSuccessOnly(logging.Filter):
-    """Silence httpx request lines that ended in a 2xx status."""
+    """Silence uvicorn access and httpx lines that ended in a 2xx status."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         match = _RESPONSE_STATUS.search(record.getMessage())
@@ -42,9 +42,10 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    httpx_logger = logging.getLogger("httpx")
-    httpx_logger.setLevel(logging.INFO)
-    httpx_logger.addFilter(_NonSuccessOnly())
+    quiet_filter = _NonSuccessOnly()
+    for target_logger in (logging.getLogger("uvicorn.access"), logging.getLogger("httpx")):
+        target_logger.setLevel(logging.INFO)
+        target_logger.addFilter(quiet_filter)
     ip, cert_path, key_path = ensure_cert()
     logging.info("Launching Anyworld on %s:%s (https://%s:%s)", args.host, args.port, ip, args.port)
     uvicorn.run(

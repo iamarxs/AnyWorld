@@ -75,7 +75,7 @@ class LLMContextManager:
         prompt = {
             "role": "user",
             "content": (
-                "The game is now starting. Create a concise scenario title and rewrite the current "
+                "The game is now starting. Rewrite the current "
                 "world state to introduce exactly "
                 "these player characters by their supplied names: "
                 f"{names}. Give each a brief scenario-appropriate occupation, class, role, or "

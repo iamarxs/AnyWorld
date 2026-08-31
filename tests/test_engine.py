@@ -127,6 +127,38 @@ def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
+def test_scenario_title_is_generated_before_game_start(tmp_path: Path) -> None:
+    async def run() -> None:
+        sender = FakeSender()
+        resolver = FakeResolver()
+        engine = GameEngine(sender, resolver)
+        engine.transcript = GameTranscript(tmp_path / "logs")
+
+        await engine.process_payload(
+            "host",
+            payload(
+                "auth",
+                name="Host",
+                password_digest=password_digest(settings.server.host_password, "host"),
+            ),
+        )
+        await engine.process_payload(
+            "host", payload("scenario_init", scenario="A gate blocks the road.")
+        )
+
+        ready = sender.events_of_type("scenario_ready")[-1]
+        assert ready.payload["title"] == "The Test Quest"
+        assert engine.scenario_title == "The Test Quest"
+        assert engine.current_scenario_state == "Two adventurers stand at a gate."
+
+        await engine.process_payload("host", payload("start_game"))
+        assert engine.scenario_title == "The Test Quest"
+        start_update = sender.events_of_type("state_update")[-1]
+        assert start_update.payload["round_title"] is None
+
+    asyncio.run(run())
+
+
 def test_active_disconnect_injects_idle_and_advances(tmp_path: Path) -> None:
     async def run() -> None:
         engine, sender, resolver = await build_started_game(tmp_path)

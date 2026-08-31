@@ -142,9 +142,17 @@ class LobbyMixin:
             if "positional" not in str(exc) and "argument" not in str(exc):
                 raise
             self.resolver.set_genesis(scenario)
+        try:
+            initial_resolution = await self.resolver.generate_initial_state()
+        except (LLMResolutionError, AttributeError) as exc:
+            LOGGER.exception("Initial scenario state generation failed")
+            async with self.lock:
+                self.state = GameState.SCENARIO_INJECTION
+            await self._send_error(client_id, f"Could not prepare scenario: {exc}")
+            return
         async with self.lock:
-            self.scenario_title = "Untitled Session"
-            self.current_scenario_state = ""
+            self.scenario_title = initial_resolution.round_title or "Untitled Session"
+            self.current_scenario_state = initial_resolution.global_narrative
             self.state = GameState.AWAITING_PLAYERS
         await self.sender.send_personal(
             client_id,
@@ -194,7 +202,6 @@ class LobbyMixin:
             return
 
         async with self.lock:
-            self.scenario_title = start_resolution.round_title or "Untitled Session"
             self.current_scenario_state = start_resolution.global_narrative
             self.state = GameState.ACTIVE_TURN
             directive = self._next_turn_locked()
@@ -210,6 +217,7 @@ class LobbyMixin:
             await self._send_error(client_id, f"Could not create game transcript: {exc}")
             return
         start_payload = start_resolution.model_dump()
+        start_payload["round_title"] = None
         start_payload["original_scenario"] = self.original_scenario
         await self.sender.broadcast_global(
             ServerEvent(type="state_update", payload=start_payload)
