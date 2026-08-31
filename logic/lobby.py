@@ -152,6 +152,9 @@ class LobbyMixin:
         )
         token_usage = getattr(self.resolver, "last_token_usage", None)
         if token_usage is not None:
+            discover = getattr(self.resolver, "discover_context_window", None)
+            if discover is not None:
+                await discover()
             await self.sender.send_personal(
                 client_id,
                 ServerEvent(
@@ -206,8 +209,10 @@ class LobbyMixin:
                 self.active_player_id = None
             await self._send_error(client_id, f"Could not create game transcript: {exc}")
             return
+        start_payload = start_resolution.model_dump()
+        start_payload["original_scenario"] = self.original_scenario
         await self.sender.broadcast_global(
-            ServerEvent(type="state_update", payload=start_resolution.model_dump())
+            ServerEvent(type="state_update", payload=start_payload)
         )
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": "The game has started."})

@@ -68,6 +68,7 @@ def test_websocket_and_resolution_schemas_are_strict() -> None:
 
 def test_context_history_evicts_oldest_round_pairs() -> None:
     manager = LLMContextManager()
+    manager.context_window_size = 128_000
     manager.set_genesis("A short beginning")
     # Spaces prevent BPE from collapsing the fixture into a tiny repeated-token run.
     large_message = "x " * 40_000

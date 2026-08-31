@@ -92,11 +92,11 @@ which case a port forward should probably be configured in the host's router. It
 to remove the port forward after the game session, unless it is intended to leave the game running
 unsupervised.
 
-**Security note:** To maintain mobile browser compatibility, the initial login sends the raw
-password in plaintext rather than a client-bound digest. This is a deliberate trade-off favoring
-broad browser support over encrypted transport. When playing without HTTPS/WSS, the password is
-visible to anyone observing network traffic, so the server should not be left running unsupervised,
-especially if it is exposed to the internet. A solution for this is planned.
+**Security note:** The game generates a self-signed, short-lived TLS certificate so connections can
+use encrypted HTTPS connections. api/tls*bootstrap.py takes automatically care of generating these
+certificates when they need to be renewed. \*\*\_This will cause web browsers to warn users that their
+connection may be insecure as they connect to the host's IP.
+However, browsers allow users to ignore this warning and continue to the app anyway.*\*\*
 
 Development reload is available with `python app.py --reload`.
 

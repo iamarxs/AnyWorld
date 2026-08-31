@@ -168,7 +168,7 @@ def test_host_can_end_game_and_finalize_transcript(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
-def test_raw_password_is_accepted(tmp_path: Path) -> None:
+def test_raw_password_is_rejected(tmp_path: Path) -> None:
     async def run() -> None:
         sender = FakeSender()
         engine = GameEngine(sender, FakeResolver())
@@ -178,8 +178,10 @@ def test_raw_password_is_accepted(tmp_path: Path) -> None:
             "host", payload("auth", name="Host", password=settings.server.host_password)
         )
 
-        assert not sender.events_of_type("error")
-        assert "host" in engine.players
+        assert sender.events_of_type("error")[-1].payload["msg"] == (
+            "'password_digest' must be a string"
+        )
+        assert not engine.players
 
     asyncio.run(run())
 

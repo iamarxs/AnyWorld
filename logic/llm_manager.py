@@ -134,7 +134,7 @@ class LLMContextManager:
     async def _request(
         self, prompt: dict[str, str], schema: type[BaseModel], *, remember: bool
     ) -> Any:
-        await self._discover_context_window()
+        await self.discover_context_window()
         await self._compact_if_needed()
         messages = self._bounded_messages(prompt)
         try:
@@ -168,7 +168,10 @@ class LLMContextManager:
         fixed = [self.system_prompt]
         if self.genesis_state is not None:
             fixed.append(self.genesis_state)
-        if len(self.history) < 4 or self._context_size([*fixed, *self.history]) <= input_limit * 0.9:
+        if (
+            len(self.history) < 4
+            or self._context_size([*fixed, *self.history]) <= input_limit * 0.9
+        ):
             return
 
         pair_count = max(1, (len(self.history) // 2) // 2)
@@ -204,14 +207,17 @@ class LLMContextManager:
             # Normal FIFO trimming remains the safe fallback.
             return
 
-    async def _discover_context_window(self) -> None:
+    async def discover_context_window(self) -> None:
         """Best-effort llama.cpp discovery, taking precedence over the configured fallback."""
         if self._context_discovered or settings.llm.provider != "compatible":
             return
         self._context_discovered = True
         try:
+            base = settings.llm.endpoint.rstrip("/")
+            if base.endswith("/v1"):
+                base = base[:-3]
             async with httpx.AsyncClient(timeout=2.0) as http_client:
-                response = await http_client.get(settings.llm.endpoint.rstrip("/") + "/props")
+                response = await http_client.get(base + "/props")
                 response.raise_for_status()
                 props = response.json()
             discovered = props.get("default_generation_settings", {}).get("n_ctx")
@@ -227,9 +233,7 @@ class LLMContextManager:
         fixed = [self.system_prompt]
         if self.genesis_state is not None:
             fixed.append(self.genesis_state)
-        input_limit = self.context_window_size - min(
-            2_048, self.context_window_size // 4
-        )
+        input_limit = self.context_window_size - min(2_048, self.context_window_size // 4)
         history = list(self.history)
         messages = [*fixed, *history, prompt]
         while history and self._context_size(messages) > input_limit:

@@ -53,6 +53,11 @@ llm:
     or otherwise establish party members; players supply their own names when joining. When the
     game starts, introduce exactly those supplied player names in global_narrative and give each
     a brief occupation, class, role, or character description appropriate to the scenario.
-    global_narrative must describe the resulting shared world state after all outcomes.
+    This introduction appears only in the opening state; never repeat or restate player
+    introductions in subsequent round resolutions. global_narrative must describe the resulting
+    shared world state after all outcomes.
+    Keep the round result descriptions to at most about 500 words.
+    Focus on concrete outcomes and new information that advances the story;
+    avoid repeating details from player resolutions or restating unchanged world state.
     Return only the requested structured object, without preamble, markdown, apology,
     or meta-commentary.
