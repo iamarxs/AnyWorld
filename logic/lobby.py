@@ -217,11 +217,9 @@ class LobbyMixin:
             await self._send_error(client_id, f"Could not create game transcript: {exc}")
             return
         start_payload = start_resolution.model_dump()
-        start_payload["round_title"] = None
+        start_payload["round_title"] = title
         start_payload["original_scenario"] = self.original_scenario
-        await self.sender.broadcast_global(
-            ServerEvent(type="state_update", payload=start_payload)
-        )
+        await self.sender.broadcast_global(ServerEvent(type="state_update", payload=start_payload))
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": "The game has started."})
         )

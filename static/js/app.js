@@ -371,6 +371,7 @@ function handleMessage(message) {
         elements.endGameButton.hidden = true;
         appendText(elements.chatMessages, `System: ${payload.msg}`, "chat-entry", MAX_CHAT_ENTRIES);
     } else if (type === "scenario_ready") {
+        elements.title.textContent = payload.title;
         elements.hostStatus.textContent = `“${payload.title}” is ready.`;
         elements.scenarioStep.hidden = true;
         elements.lobbyStep.hidden = false;

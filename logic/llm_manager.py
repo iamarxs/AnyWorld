@@ -48,7 +48,11 @@ class LLMContextManager:
 
     def set_genesis(self, scenario: str, guidance: str = "") -> None:
         """Set a new initial scenario and optional host guidance, then clear history."""
-        logger.info("Setting genesis context (guidance=%s, scenario_chars=%d)", bool(guidance), len(scenario))
+        logger.info(
+            "Setting genesis context (guidance=%s, scenario_chars=%d)",
+            bool(guidance),
+            len(scenario),
+        )
         content = f"Initial Scenario:\n{scenario}"
         if guidance:
             content += (
@@ -65,7 +69,8 @@ class LLMContextManager:
         prompt = {
             "role": "user",
             "content": (
-                "Create a concise scenario title and a vivid initial current-state paragraph "
+                "Create a concise, evocative scenario title; round_title is required and must "
+                "not be null or empty. Also create a vivid initial current-state paragraph "
                 "with at least one immediate opportunity, tension, or story hook. Do not name, "
                 "describe, count, or otherwise establish the player characters or party; their "
                 "actual names are supplied only when the game starts. Set player_resolutions to "
@@ -111,7 +116,11 @@ class LLMContextManager:
     async def generate_resolution(
         self, round_buffer: dict[str, str], dice_results: dict[str, int] | None = None
     ) -> RoundResolution:
-        logger.info("Generating resolution for %d actions (dice_results=%d)", len(round_buffer), len(dice_results or {}))
+        logger.info(
+            "Generating resolution for %d actions (dice_results=%d)",
+            len(round_buffer),
+            len(dice_results or {}),
+        )
         actions = "\n".join(
             f"{name} attempts to: {action}" for name, action in round_buffer.items()
         )
@@ -165,9 +174,17 @@ class LLMContextManager:
         usage = getattr(response, "usage", None)
         if usage is not None and getattr(usage, "total_tokens", None) is not None:
             self.last_token_usage = int(usage.total_tokens)
-            logger.info("LLM usage: prompt_tokens=%s completion_tokens=%s total_tokens=%s", getattr(usage, "prompt_tokens", None), getattr(usage, "completion_tokens", None), usage.total_tokens)
+            logger.info(
+                "LLM usage: prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                getattr(usage, "prompt_tokens", None),
+                getattr(usage, "completion_tokens", None),
+                usage.total_tokens,
+            )
         else:
-            logger.info("LLM response has no usage statistics; estimated context tokens=%d", self.last_token_usage)
+            logger.info(
+                "LLM response has no usage statistics; estimated context tokens=%d",
+                self.last_token_usage,
+            )
         if remember:
             self.history.extend(
                 [prompt, {"role": "assistant", "content": result.model_dump_json()}]
@@ -188,7 +205,9 @@ class LLMContextManager:
 
         pair_count = max(1, (len(self.history) // 2) // 2)
         old_history = self.history[: pair_count * 2]
-        logger.info("Compacting context: %d history messages (%d pairs)", len(self.history), pair_count)
+        logger.info(
+            "Compacting context: %d history messages (%d pairs)", len(self.history), pair_count
+        )
         compact_prompt = {
             "role": "user",
             "content": (
@@ -214,9 +233,11 @@ class LLMContextManager:
             self.history = [
                 memory,
                 {"role": "assistant", "content": "Memory recorded."},
-                *self.history[pair_count * 2 :],
+                *self.history[pair_count * 2:],
             ]
-            logger.info("Context compaction complete: %d history messages remain", len(self.history))
+            logger.info(
+                "Context compaction complete: %d history messages remain", len(self.history)
+            )
         except (OpenAIError, ValidationError, IndexError, TypeError, ValueError) as exc:
             # Normal FIFO trimming remains the safe fallback.
             logger.warning("Context compaction failed; using FIFO trimming: %s", exc)
