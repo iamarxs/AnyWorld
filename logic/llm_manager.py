@@ -1,5 +1,6 @@
 """OpenAI-compatible inference and bounded conversation context."""
 
+import logging
 from typing import Any
 
 import httpx
@@ -10,6 +11,8 @@ import tiktoken
 from core.config import settings
 from core.schemas import ContextSummary, DicePlan, RoundResolution
 from logic.dice import describe_roll
+
+logger = logging.getLogger(__name__)
 
 
 class LLMResolutionError(RuntimeError):
@@ -45,6 +48,7 @@ class LLMContextManager:
 
     def set_genesis(self, scenario: str, guidance: str = "") -> None:
         """Set a new initial scenario and optional host guidance, then clear history."""
+        logger.info("Setting genesis context (guidance=%s, scenario_chars=%d)", bool(guidance), len(scenario))
         content = f"Initial Scenario:\n{scenario}"
         if guidance:
             content += (
@@ -57,6 +61,7 @@ class LLMContextManager:
         self.history.clear()
 
     async def generate_initial_state(self) -> RoundResolution:
+        logger.info("Generating initial scenario state")
         prompt = {
             "role": "user",
             "content": (
@@ -71,6 +76,7 @@ class LLMContextManager:
 
     async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
         """Introduce the joined players in the scenario when play begins."""
+        logger.info("Generating start state for %d players", len(player_names))
         names = ", ".join(player_names)
         prompt = {
             "role": "user",
@@ -88,6 +94,7 @@ class LLMContextManager:
 
     async def plan_dice(self, round_buffer: dict[str, str]) -> DicePlan:
         """Ask the DM which actions need uncertainty resolved by a d100."""
+        logger.info("Planning dice for %d player actions", len(round_buffer))
         actions = "\n".join(f"{name}: {action}" for name, action in round_buffer.items())
         prompt = {
             "role": "user",
@@ -104,6 +111,7 @@ class LLMContextManager:
     async def generate_resolution(
         self, round_buffer: dict[str, str], dice_results: dict[str, int] | None = None
     ) -> RoundResolution:
+        logger.info("Generating resolution for %d actions (dice_results=%d)", len(round_buffer), len(dice_results or {}))
         actions = "\n".join(
             f"{name} attempts to: {action}" for name, action in round_buffer.items()
         )
@@ -136,6 +144,7 @@ class LLMContextManager:
     ) -> Any:
         await self.discover_context_window()
         await self._compact_if_needed()
+        logger.debug("Requesting %s with %d history messages", schema.__name__, len(self.history))
         messages = self._bounded_messages(prompt)
         try:
             response = await self.client.beta.chat.completions.parse(
@@ -156,6 +165,9 @@ class LLMContextManager:
         usage = getattr(response, "usage", None)
         if usage is not None and getattr(usage, "total_tokens", None) is not None:
             self.last_token_usage = int(usage.total_tokens)
+            logger.info("LLM usage: prompt_tokens=%s completion_tokens=%s total_tokens=%s", getattr(usage, "prompt_tokens", None), getattr(usage, "completion_tokens", None), usage.total_tokens)
+        else:
+            logger.info("LLM response has no usage statistics; estimated context tokens=%d", self.last_token_usage)
         if remember:
             self.history.extend(
                 [prompt, {"role": "assistant", "content": result.model_dump_json()}]
@@ -176,6 +188,7 @@ class LLMContextManager:
 
         pair_count = max(1, (len(self.history) // 2) // 2)
         old_history = self.history[: pair_count * 2]
+        logger.info("Compacting context: %d history messages (%d pairs)", len(self.history), pair_count)
         compact_prompt = {
             "role": "user",
             "content": (
@@ -203,8 +216,10 @@ class LLMContextManager:
                 {"role": "assistant", "content": "Memory recorded."},
                 *self.history[pair_count * 2 :],
             ]
-        except (OpenAIError, ValidationError, IndexError, TypeError, ValueError):
+            logger.info("Context compaction complete: %d history messages remain", len(self.history))
+        except (OpenAIError, ValidationError, IndexError, TypeError, ValueError) as exc:
             # Normal FIFO trimming remains the safe fallback.
+            logger.warning("Context compaction failed; using FIFO trimming: %s", exc)
             return
 
     async def discover_context_window(self) -> None:

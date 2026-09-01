@@ -183,6 +183,10 @@ function syncActions(roundNumber, submittedActions = {}) {
     });
 }
 
+function displayGameTitle(title) {
+    return title ? `Anyworld - ${title}` : "Anyworld";
+}
+
 function appendScenario(scenario) {
     if (!scenario) {
         return;
@@ -259,7 +263,7 @@ function applySnapshot(payload) {
     renderPlayers(payload.players);
     elements.identity.textContent = `${payload.name}${isHost ? " (Host)" : ""}`;
     if (payload.scenario_title) {
-        elements.title.textContent = payload.scenario_title;
+        elements.title.textContent = displayGameTitle(payload.scenario_title);
     }
     elements.state.replaceChildren();
     appendScenario(payload.original_scenario);
@@ -305,7 +309,7 @@ function handleMessage(message) {
         setThinking(false);
         setPlayerOrder(payload.player_order);
         if (payload.round_title) {
-            elements.title.textContent = payload.round_title;
+            elements.title.textContent = displayGameTitle(payload.round_title);
         }
         startRound(payload.round_number);
         syncActions(payload.round_number, payload.submitted_actions);

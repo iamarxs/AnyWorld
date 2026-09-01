@@ -36,7 +36,11 @@ dd{{margin:0 0 .8rem;white-space:pre-wrap}}
 .state{{white-space:pre-wrap;color:#b8c4ce}}
 .dice-rolls{{padding:.6rem;background:#1c2a3a;border:1px solid #4a5c6e;
 border-radius:.4rem;margin:.8rem 0}}
-</style></head><body><header><h1>{escape(title)}</h1><h2>Opening state</h2>
+dl dt:nth-of-type(8n+1){{color:#79c0ff}}dl dt:nth-of-type(8n+2){{color:#ffa657}}
+dl dt:nth-of-type(8n+3){{color:#56d364}}dl dt:nth-of-type(8n+4){{color:#ff7b72}}
+dl dt:nth-of-type(8n+5){{color:#d2a8ff}}dl dt:nth-of-type(8n+6){{color:#f2cc60}}
+dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
+</style></head><body><header><h1>Anyworld - {escape(title)}</h1><h2>Opening state</h2>
 <p class="state">{escape(initial_state)}</p></header><main>
 """
         await asyncio.to_thread(self._append, document)
@@ -48,7 +52,12 @@ border-radius:.4rem;margin:.8rem 0}}
         actions: dict[str, str],
         resolution: RoundResolution,
         dice_results: dict[str, int] | None = None,
+        player_colors: dict[str, int] | None = None,
     ) -> None:
+        player_colors = player_colors or {}
+
+        # Actions and results retain join order, so nth-of-type colors the same player
+        # consistently without changing the readable transcript markup.
         actions_html = "".join(
             f"<dt>{escape(name)}</dt><dd>{escape(action)}</dd>" for name, action in actions.items()
         )

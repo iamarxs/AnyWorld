@@ -264,6 +264,10 @@ class GameEngine(LobbyMixin):
                     for name, value in dice_results.items()
                     if name not in hidden_rolls
                 },
+                player_colors={
+                    self.players[client_id].name: self.players[client_id].join_index
+                    for client_id in participant_data
+                },
             )
         except OSError:
             LOGGER.exception("Could not append round %s to transcript", round_number)
@@ -282,13 +286,9 @@ class GameEngine(LobbyMixin):
             ServerEvent(type="dm_thinking", payload={"active": False})
         )
         await self.sender.broadcast_global(ServerEvent(type="state_update", payload=state_payload))
-        host_id = next(
-            (client_id for client_id in self.join_order if self.players[client_id].is_host), None
-        )
         token_usage = getattr(self.resolver, "last_token_usage", None)
-        if host_id is not None and token_usage is not None:
-            await self.sender.send_personal(
-                host_id,
+        if token_usage is not None:
+            await self.sender.broadcast_global(
                 ServerEvent(
                     type="token_usage",
                     payload={

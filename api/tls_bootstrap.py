@@ -1,7 +1,8 @@
 # tls_bootstrap.py
-import ipaddress
-import socket
 import datetime
+import ipaddress
+import logging
+import socket
 from pathlib import Path
 
 from cryptography import x509
@@ -15,6 +16,8 @@ KEY_PATH = CERT_DIR / "key.pem"
 # comfortably under CA/Browser Forum's 825-day cap, irrelevant for self-signed but conventional
 VALIDITY_DAYS = 825
 REGEN_THRESHOLD_DAYS = 30  # regenerate if cert expires soon
+
+logger = logging.getLogger(__name__)
 
 
 def get_external_ip() -> str:
@@ -99,5 +102,11 @@ def ensure_cert() -> tuple[str, str, str]:
     """Returns (external_ip, cert_path, key_path), regenerating the cert if needed."""
     ip = get_external_ip()
     if not _cert_covers_ip_and_is_fresh(ip):
+        logger.info(
+            "TLS certificate for %s is missing, expiring soon, or does not cover the IP; renewing",
+            ip,
+        )
         _generate_cert(ip)
+    else:
+        logger.debug("TLS certificate is valid for %s", ip)
     return ip, str(CERT_PATH), str(KEY_PATH)

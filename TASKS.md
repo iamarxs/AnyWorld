@@ -2,13 +2,6 @@
 
 ## Active
 
-- [ ] Add more logging.
-  - logic/llm_manager.py should log when set_genesis, generate_initial_state, generate_start_state, plan_dice or generate_resolution is run. Also, compacting the context window should be logged. If the AI backend returns any useful statistics after a query, they should be logged.
-  - api/tls_bootstrap.py should log when certificates need to be renewed.
-- [ ] Make token usage visible to all players.
-- [ ] Game transcripts should use the same player colors as the player round actions pane, to give it a more lively look.
-- [ ] Add the game name in front of the scenario name: Anyworld - (scenario name)
-
 ## Waiting On
 
 ## Someday
@@ -19,6 +12,12 @@
 
 ## Done
 
+- [x] ~~Make token usage visible to all players.~~ (2026-09-01)
+- [x] ~~Game transcripts should use the same player colors as the player round actions pane, to give it a more lively look.~~ (2026-09-01)
+- [x] ~~Add the game name in front of the scenario name: Anyworld - (scenario name)~~ (2026-09-01)
+- [x] ~~Add more logging.~~ (2026-09-01)
+  - ~~logic/llm_manager.py logs set_genesis, generate_initial_state, generate_start_state, plan_dice, generate_resolution, context compaction, and backend token statistics.~~
+  - ~~api/tls_bootstrap.py logs when certificates need to be renewed.~~
 - [x] ~~class \_NonSuccessOnly(logging.Filter) in app.py does not work. All "200 OK" events are logged to the console.~~ (2026-09-01)
 - [x] ~~After the host has entered the scenario, the AI fails to generate a descriptive name for the session, instead telling the host that “Untitled Session” is ready. Only after the game is started is the name generated.~~ (2026-09-01)
 - [x] ~~Restrict dice rolls in system prompt to truly difficult/risky/absurd attempts only~~ (2026-08-28)
