@@ -53,7 +53,6 @@ const elements = {
     hostStatus: document.getElementById("host-status"),
     title: document.getElementById("scenario-title"),
     identity: document.getElementById("player-identity"),
-    state: document.getElementById("state-pane"),
     log: document.getElementById("log-pane"),
     playerList: document.getElementById("player-list"),
     chatMessages: document.getElementById("chat-messages"),
@@ -67,6 +66,7 @@ const elements = {
     tokenChart: document.getElementById("token-chart"),
     tokenCount: document.getElementById("token-count"),
     endGameButton: document.getElementById("end-game-button"),
+    retryRoundButton: document.getElementById("retry-round-button"),
 };
 
 let authenticated = false;
@@ -75,7 +75,6 @@ let lastStartedRound = 0;
 const renderedActions = new Set();
 const playerColors = new Map();
 const MAX_LOG_ENTRIES = 500;
-const MAX_STATE_ENTRIES = 100;
 const MAX_CHAT_ENTRIES = 300;
 
 function send(eventType, data) {
@@ -192,7 +191,7 @@ function appendScenario(scenario) {
         return;
     }
     const entry = document.createElement("article");
-    entry.className = "state-entry original-scenario";
+    entry.className = "state-entry opening-entry original-scenario";
     const label = document.createElement("strong");
     label.className = "state-round-label";
     label.textContent = "Opening scenario";
@@ -200,13 +199,13 @@ function appendScenario(scenario) {
     narrative.className = "state-narrative";
     narrative.textContent = scenario;
     entry.append(label, narrative);
-    elements.state.appendChild(entry);
+    elements.log.prepend(entry);
 }
 
 function appendState(text, roundNumber = null) {
-    elements.state.querySelector(".current-state")?.classList.remove("current-state");
     const entry = document.createElement("article");
-    entry.className = "state-entry current-state";
+    entry.className = "state-entry";
+    entry.classList.add(roundNumber === null ? "opening-entry" : "current-round");
 
     const label = document.createElement("strong");
     label.className = "state-round-label";
@@ -217,9 +216,11 @@ function appendState(text, roundNumber = null) {
     narrative.textContent = text;
 
     entry.append(label, narrative);
-    elements.state.appendChild(entry);
-    trimContainer(elements.state, MAX_STATE_ENTRIES);
-    elements.state.scrollTop = elements.state.scrollHeight;
+    elements.log.appendChild(entry);
+    trimContainer(elements.log, MAX_LOG_ENTRIES);
+    if (roundNumber !== null) {
+        elements.log.scrollTop = elements.log.scrollHeight;
+    }
 }
 
 function showError(message) {
@@ -236,7 +237,7 @@ function showError(message) {
 }
 
 function showHostStep(state) {
-    if (!isHost || state === "ACTIVE_TURN" || state === "AWAITING_LLM") {
+    if (!isHost || ["ACTIVE_TURN", "AWAITING_LLM", "ENDED"].includes(state)) {
         elements.hostModal.hidden = true;
         return;
     }
@@ -259,16 +260,20 @@ function applyTurn(activePlayerId, activePlayerName) {
 
 function applySnapshot(payload) {
     isHost = payload.is_host;
+    elements.retryRoundButton.hidden = !isHost || !payload.round_paused;
+    elements.actionInput.disabled = true;
+    setThinking(payload.state === "AWAITING_LLM" && !payload.round_paused);
     setPlayerOrder(payload.player_order);
     renderPlayers(payload.players);
     elements.identity.textContent = `${payload.name}${isHost ? " (Host)" : ""}`;
     if (payload.scenario_title) {
         elements.title.textContent = displayGameTitle(payload.scenario_title);
     }
-    elements.state.replaceChildren();
-    appendScenario(payload.original_scenario);
-    if (payload.scenario_state) {
-        appendState(payload.scenario_state, payload.completed_round_number);
+    if (elements.log.children.length === 0) {
+        appendScenario(payload.original_scenario);
+        if (payload.round_number && payload.scenario_state) {
+            appendState(payload.scenario_state, payload.completed_round_number);
+        }
     }
     if (payload.round_number) {
         startRound(payload.round_number);
@@ -287,6 +292,9 @@ function handleMessage(message) {
         return;
     }
     if (type === "auth_ok") {
+        const savedAuth = JSON.parse(sessionStorage.getItem("artificialDungeonAuth") || "{}");
+        savedAuth.reconnect_token = payload.reconnect_token;
+        sessionStorage.setItem("artificialDungeonAuth", JSON.stringify(savedAuth));
         authenticated = true;
         elements.loginModal.hidden = true;
         elements.grid.hidden = false;
@@ -311,11 +319,11 @@ function handleMessage(message) {
         if (payload.round_title) {
             elements.title.textContent = displayGameTitle(payload.round_title);
         }
-        startRound(payload.round_number);
-        syncActions(payload.round_number, payload.submitted_actions);
-        if (payload.original_scenario && !elements.state.querySelector(".original-scenario")) {
+        if (payload.original_scenario && !elements.log.querySelector(".original-scenario")) {
             appendScenario(payload.original_scenario);
         }
+        startRound(payload.round_number);
+        syncActions(payload.round_number, payload.submitted_actions);
         appendState(payload.global_narrative, payload.round_number);
         Object.entries(payload.dice_results || {}).forEach(([player, roll]) => {
             appendText(
@@ -336,6 +344,11 @@ function handleMessage(message) {
         renderPlayers(payload.players);
     } else if (type === "dm_thinking") {
         setThinking(Boolean(payload.active));
+        if (payload.active) {
+            elements.retryRoundButton.hidden = true;
+            elements.endGameButton.hidden = !isHost;
+            elements.hostModal.hidden = true;
+        }
     } else if (type === "chat_echo") {
         appendText(
             elements.chatMessages,
@@ -355,6 +368,7 @@ function handleMessage(message) {
         }
     } else if (type === "token_usage") {
         elements.tokenUsage.hidden = false;
+        elements.tokenUsage.title = payload.counting_method || "Estimated token usage";
         const used = Math.max(0, Number(payload.approximate_tokens) || 0);
         const limit = Math.max(1, Number(payload.context_window_size) || used || 1);
         const ratio = Math.min(1, used / limit);
@@ -369,8 +383,11 @@ function handleMessage(message) {
         setThinking(false);
         elements.actionInput.disabled = true;
         elements.endGameButton.hidden = true;
+        elements.retryRoundButton.hidden = true;
         appendText(elements.chatMessages, `System: ${payload.msg}`, "chat-entry", MAX_CHAT_ENTRIES);
     } else if (type === "scenario_ready") {
+        elements.hostModal.hidden = false;
+        elements.endGameButton.hidden = true;
         elements.title.textContent = payload.title;
         elements.hostStatus.textContent = `“${payload.title}” is ready.`;
         elements.scenarioStep.hidden = true;
@@ -380,6 +397,17 @@ function handleMessage(message) {
         showError(payload.msg || "Unknown server error.");
         elements.scenarioForm.querySelector("button").disabled = false;
         elements.startButton.disabled = false;
+        if (payload.state) {
+            showHostStep(payload.state);
+            elements.hostStatus.textContent = payload.msg;
+            elements.endGameButton.hidden = !isHost ||
+                !["ACTIVE_TURN", "AWAITING_LLM"].includes(payload.state);
+        }
+        if (payload.round_paused) {
+            setThinking(false);
+            elements.retryRoundButton.hidden = !isHost;
+            elements.actionInput.disabled = true;
+        }
     }
 }
 
@@ -496,11 +524,15 @@ elements.loginForm.addEventListener("submit", async (event) => {
         const auth = {
             name: elements.name.value.trim(),
             password_digest: await passwordDigest(elements.password.value),
+            reconnect_token: JSON.parse(
+                sessionStorage.getItem("artificialDungeonAuth") || "{}",
+            ).reconnect_token,
         };
         if (send("auth", auth)) {
             sessionStorage.setItem("artificialDungeonAuth", JSON.stringify({
                 name: auth.name,
                 password_digest: auth.password_digest,
+                reconnect_token: auth.reconnect_token,
             }));
         }
     } catch (error) {
@@ -525,6 +557,10 @@ elements.endGameButton.addEventListener("click", () => {
     if (window.confirm("End this game for every player?")) {
         send("end_game", {});
     }
+});
+
+elements.retryRoundButton.addEventListener("click", () => {
+    send("retry_round", {});
 });
 
 elements.startButton.addEventListener("click", () => {

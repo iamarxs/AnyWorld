@@ -40,10 +40,9 @@ body {
 #grid-container {
     display: grid;
     grid-template-columns: 20% 80%;
-    grid-template-rows: 3% 25% 67% 5%;
+    grid-template-rows: 3% 92% 5%;
     grid-template-areas:
         "chat title"
-        "chat state"
         "chat log"
         "chat input";
     width: 100vw;
@@ -58,7 +57,6 @@ body {
     border-right: 1px solid var(--border);
 }
 #chat-messages,
-#state-pane,
 #log-pane {
     min-height: 0;
     padding: 0.75rem;
@@ -156,20 +154,11 @@ body {
     font-size: 0.78rem;
     white-space: nowrap;
 }
-#state-pane,
 #log-pane {
     position: relative;
-}
-#state-pane {
-    grid-area: state;
-    border-bottom: 3px solid var(--accent);
-    background: #111923;
-}
-#log-pane {
     grid-area: log;
     background: #0b0f14;
 }
-#state-pane::before,
 #log-pane::before {
     position: sticky;
     z-index: 2;
@@ -184,9 +173,6 @@ body {
     font-weight: bold;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-}
-#state-pane::before {
-    color: var(--accent);
 }
 #log-pane::before {
     color: var(--action-accent);
@@ -288,16 +274,10 @@ button:disabled {
 .state-entry {
     margin: 0 0 0.7rem;
     padding: 0.65rem 0.75rem;
-    border-left: 3px solid var(--border);
+    border-left: 3px solid var(--accent);
     border-radius: 0.25rem;
     background: rgb(22 27 34 / 55%);
-    color: var(--muted);
-}
-.state-entry.current-state {
-    border-left-color: var(--accent);
-    background: #1b2430;
     color: var(--text);
-    box-shadow: 0 0 0 1px rgb(88 166 255 / 15%);
 }
 .state-round-label {
     display: block;
@@ -368,14 +348,18 @@ button:disabled {
     border-color: rgb(228 125 125 / 55%);
     color: var(--error);
 }
-#state-pane > :not(.current-state):not(.original-scenario),
-#log-pane > :not(.current-round):not(.latest-complete-round) {
+#retry-round-button {
+    position: fixed;
+    z-index: 7;
+    right: 0.6rem;
+    top: 5.5rem;
+}
+#log-pane > :not(.current-round):not(.latest-complete-round):not(.opening-entry) {
     opacity: 0.48;
 }
-#state-pane > .original-scenario,
-#state-pane > .current-state,
 #log-pane > .current-round,
-#log-pane > .latest-complete-round {
+#log-pane > .latest-complete-round,
+#log-pane > .opening-entry {
     opacity: 1 !important;
 }
 .dice-entry { margin: 0 0 0.7rem; font-weight: bold; }
@@ -389,8 +373,8 @@ button:disabled {
 @media (max-width: 700px) {
     #grid-container {
         grid-template-columns: 100%;
-        grid-template-rows: 7% 24% 39% 23% 7%;
-        grid-template-areas: "title" "state" "log" "chat" "input";
+        grid-template-rows: 7% 46% 40% 7%;
+        grid-template-areas: "title" "log" "chat" "input";
     }
     #title-pane {
         justify-content: flex-start;
@@ -415,11 +399,9 @@ button:disabled {
         white-space: nowrap;
     }
     #chat-messages,
-    #state-pane,
     #log-pane {
         padding: 0.55rem 0.65rem;
     }
-    #state-pane::before,
     #log-pane::before {
         top: -0.55rem;
         margin: -0.55rem -0.65rem 0.55rem;
