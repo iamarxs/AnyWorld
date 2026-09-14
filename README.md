@@ -12,7 +12,7 @@ their own words while an AI weaves every choice into a story that keeps unfoldin
 - Unblocked party/system chat
 - Bounded and automatically compacted LLM history with Pydantic-validated responses
 - Non-blocking, escaped HTML transcripts under `.logged_games/`
-- DM-selected d100 checks, host token estimates, reconnection, and host end-game controls
+- DM-selected d100 checks, token estimates, authenticated reconnection, and host retry/end controls
 
 ## Configure
 
@@ -45,17 +45,41 @@ still attempts to read the context size from the llama.cpp `/props` endpoint eve
 configured. A successful discovery takes precedence; if discovery is unavailable, the configured
 value is used. The default fallback is a conservative 8,192 tokens. OpenAI does not currently
 provide automatic context-limit discovery, so configure this value to the selected model's
-documented limit. A good game experience requires a reasonably large context window; 32,768 tokens
-is a useful target when the backend supports it, because more history allows the world and story
-to remain coherent across rounds. Anyworld uses this value to trim conversation history, but it
-cannot increase the limit enforced by llama.cpp or OpenAI. When history reaches 90% of the
-available input budget, older rounds are compacted into structured durable memory; if compaction
-fails, the existing oldest-history trimming is used instead. Set `tokenizer_encoding` to the
-[tiktoken](https://github.com/openai/tiktoken) encoding used by the configured model so
-context-window accounting remains exact. The default (`cl100k_base`) works for many
-OpenAI-compatible models. If the reported token counts don't make sense, or the app
-errors out on startup, set it to `null` in `config.yaml` to disable tiktoken and fall back to a
-rough character-based estimate.
+documented limit. The configured value cannot increase the backend's actual capacity.
+llama.cpp token counting uses its `/apply-template` and `/tokenize` endpoints when available.
+For direct OpenAI, a configured `tokenizer_encoding` is used only if it matches the model's known
+tiktoken encoding. Unknown models, mismatches, unavailable endpoints, or `null` encoding use a
+conservative UTF-8-byte estimate. Schema/framing allowances and a safety margin are added; counts
+are not advertised as exact. The token indicator's tooltip describes the counting method.
+
+Optional limits under `llm` (defaults shown) apply to every model call, including summaries:
+
+```yaml
+  initial_output_tokens: 1024
+  round_output_tokens: 2048
+  dice_output_tokens: 512
+  summary_output_tokens: 1024
+  token_safety_margin: 256
+  request_timeout_seconds: 120.0
+  max_retries: 1
+```
+
+Choose caps that leave sufficient input capacity within the effective backend context, especially
+for large parties. Before a request exceeds its budget, older rounds are merged into separate
+durable memory. Failed or oversized summaries leave the original memory intact. Oversized actions
+are rejected while retaining the player's turn. An inference or compaction failure pauses the round
+with its submitted actions and any existing dice preserved; the host can use **Retry paused round**
+or **End game**. Retrying uses the same dice. Chat stays available during inference.
+
+Dice planning includes private guidance, durable facts and recent history so old injuries, obstacles
+and secret triggers remain relevant. Public output is instructed to reveal only observable consequences;
+direct guidance echoes and explicit hidden-roll disclosures are rejected. This guard is not a guarantee
+against every possible paraphrase of a secret.
+
+Pending sockets receive no game broadcasts. Optional `server` admission settings are
+`max_pending_connections: 32`, `auth_timeout_seconds: 30.0`, and `max_auth_attempts: 3`.
+Reconnects require a per-player token stored in the same browser tab's sessionStorage, in addition
+to the password. Keep that browser session to rejoin your character; clearing it loses the token.
 
 ## Install (Windows Git Bash)
 
