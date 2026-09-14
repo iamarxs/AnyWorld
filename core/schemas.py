@@ -12,7 +12,9 @@ class StrictModel(BaseModel):
 
 
 class ClientPayload(StrictModel):
-    event_type: Literal["auth", "chat", "action", "scenario_init", "start_game", "end_game"]
+    event_type: Literal[
+        "auth", "chat", "action", "scenario_init", "start_game", "end_game", "retry_round"
+    ]
     data: dict[str, Any]
 
 
