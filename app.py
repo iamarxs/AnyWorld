@@ -17,11 +17,13 @@ class _NonSuccessOnly(logging.Filter):
     """Silence uvicorn access and httpx lines that ended in a 2xx status."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Keep records that are not 2xx access lines; drop 2xx status lines."""
         match = _RESPONSE_STATUS.search(record.getMessage())
         return match is None or not match.group(1).startswith("2")
 
 
 def main() -> None:
+    """Parse CLI arguments, configure logging and launch the HTTPS gateway."""
     try:
         settings.server.validate_passwords()
     except ValueError as exc:

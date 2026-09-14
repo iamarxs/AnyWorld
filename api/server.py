@@ -29,11 +29,13 @@ class ConnectionManager:
     """
 
     def __init__(self) -> None:
+        """Track pending sockets and the active connection for each client."""
         self.active_connections: dict[str, WebSocket] = {}
         self.pending: set[WebSocket] = set()
         self._send_locks: dict[WebSocket, asyncio.Lock] = {}
 
     async def connect(self, client_id: str, websocket: WebSocket) -> bool:
+        """Accept a pending socket, closing it if the pending cap is reached."""
         del client_id
         if len(self.pending) >= settings.server.max_pending_connections:
             await websocket.close(code=1013, reason="Too many pending connections")
@@ -49,6 +51,7 @@ class ConnectionManager:
         return True
 
     def promote(self, client_id: str, websocket: WebSocket) -> WebSocket | None:
+        """Move an authenticated socket into the active map, returning any replaced socket."""
         if websocket not in self.pending:
             raise ValueError("Connection is no longer pending authentication.")
         previous = self.active_connections.get(client_id)
@@ -57,9 +60,11 @@ class ConnectionManager:
         return previous
 
     def owns(self, client_id: str, websocket: WebSocket) -> bool:
+        """Return whether the socket is the current active connection for the client."""
         return self.active_connections.get(client_id) is websocket
 
     async def disconnect(self, client_id: str, websocket: WebSocket) -> bool:
+        """Remove a socket if it is the active connection for the client."""
         self.pending.discard(websocket)
         self._send_locks.pop(websocket, None)
         if not self.owns(client_id, websocket):
@@ -68,25 +73,31 @@ class ConnectionManager:
         return True
 
     async def broadcast_global(self, event: ServerEvent) -> None:
+        """Send an event to all active connections."""
         await self._broadcast(event)
 
     async def broadcast_except(self, client_id: str, event: ServerEvent) -> None:
+        """Send an event to all active connections except one client."""
         await self._broadcast(event, exclude=client_id)
 
     async def _broadcast(self, event: ServerEvent, exclude: str | None = None) -> None:
+        """Serialize and send an event to all active connections, optionally excluding one."""
         message = event.model_dump_json()
         sockets = [socket for item, socket in self.active_connections.items() if item != exclude]
         await asyncio.gather(*(self._send_text(socket, message) for socket in sockets))
 
     async def send_personal(self, client_id: str, event: ServerEvent) -> None:
+        """Send an event to a single client's active connection."""
         websocket = self.active_connections.get(client_id)
         if websocket is not None:
             await self.send_socket(websocket, event)
 
     async def send_socket(self, websocket: WebSocket, event: ServerEvent) -> None:
+        """Send an event to a specific socket."""
         await self._send_text(websocket, event.model_dump_json())
 
     async def _send_text(self, websocket: WebSocket, message: str) -> None:
+        """Send serialized text under the socket's send lock, closing on failure."""
         lock = self._send_locks.get(websocket)
         if lock is None:
             return
@@ -99,6 +110,7 @@ class ConnectionManager:
 
     @staticmethod
     async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
+        """Close a socket, tolerating errors and timeouts."""
         try:
             async with asyncio.timeout(2):
                 await websocket.close(code=code)
@@ -106,6 +118,7 @@ class ConnectionManager:
             pass
 
     async def close(self) -> None:
+        """Close all active and pending sockets and clear the connection maps."""
         sockets = set(self.active_connections.values()) | self.pending
         await asyncio.gather(*(self.close_socket(socket) for socket in sockets))
         self.active_connections.clear()
@@ -114,8 +127,11 @@ class ConnectionManager:
 
 
 def create_app(resolver_factory=LLMContextManager) -> FastAPI:
+    """Build the FastAPI app with its lifespan, routes and WebSocket gateway."""
+
     @asynccontextmanager
     async def lifespan(application: FastAPI):
+        """Validate passwords and manage engine/manager startup and shutdown."""
         settings.server.validate_passwords()
         manager = ConnectionManager()
         engine = GameEngine(manager, resolver_factory())
@@ -135,10 +151,12 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
 
     @application.get("/", response_class=HTMLResponse)
     async def get_index(request: Request) -> HTMLResponse:
+        """Serve the main HTML page."""
         return templates.TemplateResponse(request=request, name="index.html")
 
     @application.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
+        """Handle a client socket: authenticate it and route its messages."""
         try:
             if str(UUID(client_id)) != client_id:
                 raise ValueError("Noncanonical UUID")

@@ -12,6 +12,8 @@ class StrictModel(BaseModel):
 
 
 class ClientPayload(StrictModel):
+    """Envelope for a client-to-server WebSocket message."""
+
     event_type: Literal[
         "auth", "chat", "action", "scenario_init", "start_game", "end_game", "retry_round"
     ]
@@ -19,6 +21,8 @@ class ClientPayload(StrictModel):
 
 
 class ServerEvent(StrictModel):
+    """Envelope for a server-to-client WebSocket message."""
+
     type: Literal[
         "state_update",
         "chat_echo",
@@ -54,6 +58,8 @@ class ContextSummary(StrictModel):
 
 
 class RoundResolution(StrictModel):
+    """Structured outcome of a resolved round."""
+
     round_title: str | None = None
     global_narrative: str
     player_resolutions: dict[str, str]

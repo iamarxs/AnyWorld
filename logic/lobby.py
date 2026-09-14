@@ -29,6 +29,7 @@ class LobbyMixin:
         *,
         authorize: Callable[[], bool] = lambda: True,
     ) -> None:
+        """Route a validated client payload to its handler, restoring the turn on error."""
         token = CURRENT_OWNER.set(authorize)
         try:
             if not authorize():
@@ -57,6 +58,7 @@ class LobbyMixin:
         *,
         activate: Callable[[], None] | None = None,
     ) -> bool:
+        """Authenticate or reconnect a client and activate its transport connection."""
         name = clean_text(data.get("name"), "name", 40)
         digest = clean_text(data.get("password_digest"), "password_digest", 64)
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
@@ -137,12 +139,14 @@ class LobbyMixin:
 
     @staticmethod
     def _password_matches(digest: str, password: str | None, client_id: str) -> bool:
+        """Return whether a digest matches the password bound to a client."""
         if not password:
             return False
         expected = hashlib.sha256(f"{password}{client_id}".encode()).hexdigest()
         return hmac.compare_digest(digest, expected)
 
     async def _chat(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
+        """Broadcast a player's chat message to all connections."""
         message = clean_text(data.get("message"), "message", 1_000)
         async with self.lock:
             if not CURRENT_OWNER.get()():
@@ -157,6 +161,7 @@ class LobbyMixin:
     async def _initialize_scenario(
         self: "GameEngine", client_id: str, data: dict[str, object]
     ) -> None:
+        """Accept the host's scenario and launch its preparation job."""
         scenario = clean_text(data.get("scenario"), "scenario", 20_000)
         guidance = clean_optional_text(data.get("guidance"), "guidance", 5_000)
         async with self.lock:
@@ -175,6 +180,7 @@ class LobbyMixin:
     async def _prepare_scenario(
         self: "GameEngine", epoch: int, client_id: str, scenario: str, guidance: str
     ) -> None:
+        """Generate the initial scenario state and publish it to the host."""
         self.resolver.set_genesis(scenario, guidance)
         resolution = await self.resolver.generate_initial_state()
         async with self.effects_lock:
@@ -192,6 +198,7 @@ class LobbyMixin:
             await self._publish_usage(client_id)
 
     async def _start_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
+        """Accept the host's start command and launch the start job."""
         del data
         async with self.lock:
             if not CURRENT_OWNER.get()():
@@ -207,6 +214,7 @@ class LobbyMixin:
             )
 
     async def _prepare_start(self: "GameEngine", epoch: int, names: list[str]) -> None:
+        """Introduce the players and transition the game to its active turn."""
         resolution = await self.resolver.generate_start_state(names)
         async with self.effects_lock:
             async with self.lock:
@@ -236,6 +244,7 @@ class LobbyMixin:
                 await self.sender.broadcast_global(directive)
 
     async def _end_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
+        """Validate the host's end command and shut down the session."""
         del data
         async with self.lock:
             if not CURRENT_OWNER.get()():
@@ -248,6 +257,7 @@ class LobbyMixin:
         await self.shutdown(close_resolver=False)
 
     def _player_roster_event(self: "GameEngine") -> ServerEvent:
+        """Build a player roster event from the current players."""
         return ServerEvent(
             type="player_roster",
             payload={
@@ -263,6 +273,7 @@ class LobbyMixin:
         )
 
     def _snapshot_locked(self: "GameEngine", player: Player) -> dict[str, object]:
+        """Build the reconnect snapshot for an authenticated player."""
         return {
             "client_id": player.client_id,
             "reconnect_token": player.reconnect_token,

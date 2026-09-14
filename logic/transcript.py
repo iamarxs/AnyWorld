@@ -13,6 +13,7 @@ class GameTranscript:
     """Own one session's collision-safe HTML transcript."""
 
     def __init__(self, log_dir: Path = Path(".logged_games")) -> None:
+        """Own one session's transcript under the given log directory."""
         self.log_dir = log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.path: Path | None = None
@@ -20,6 +21,7 @@ class GameTranscript:
         self._io_lock = asyncio.Lock()
 
     async def start(self, title: str, initial_state: str) -> None:
+        """Create the transcript file and write the opening state."""
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")
         stem = f"{datetime.now():%Y-%m-%d}-{safe_title or 'session'}"
         self.path = self.log_dir / f"{stem}.html"
@@ -54,6 +56,7 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
         dice_results: dict[str, int] | None = None,
         player_colors: dict[str, int] | None = None,
     ) -> None:
+        """Append a resolved round's actions, dice and results."""
         player_colors = player_colors or {}
 
         # Actions and results retain join order, so nth-of-type colors the same player
@@ -90,12 +93,14 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
         return '<div class="dice-rolls"><h3>Dice rolls</h3>' f"<dl>{''.join(roll_items)}</dl></div>"
 
     async def finalize(self, reason: str = "The host ended the game.") -> None:
+        """Close the transcript document and mark it finalized."""
         if self.path is None or self._finalized:
             return
         ending = f"</main><footer><p>{escape(reason)}</p></footer></body></html>\n"
         await self._write(ending, final=True)
 
     async def _write(self, text: str, *, final: bool = False) -> None:
+        """Serialize and append text, waiting out in-flight writes on cancel."""
         async with self._io_lock:
             if self._finalized:
                 if final:
@@ -115,6 +120,7 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
                 self._finalized = True
 
     def _append(self, text: str) -> None:
+        """Append text to the transcript file synchronously."""
         if self.path is None:
             raise RuntimeError("Transcript must be started before writing rounds")
         with self.path.open("a", encoding="utf-8") as log_file:

@@ -11,31 +11,43 @@ from logic.transcript import GameTranscript
 
 
 class FakeSender:
+    """In-memory event sender that records sent events."""
+
     def __init__(self) -> None:
+        """Initialize the event recorder."""
         self.events: list[tuple[str | None, ServerEvent]] = []
 
     async def broadcast_global(self, event: ServerEvent) -> None:
+        """Record a global event."""
         self.events.append((None, event))
 
     async def send_personal(self, client_id: str, event: ServerEvent) -> None:
+        """Record a personal event."""
         self.events.append((client_id, event))
 
     async def broadcast_except(self, client_id: str, event: ServerEvent) -> None:
+        """Record a broadcast-except event."""
         self.events.append((f"except:{client_id}", event))
 
     def events_of_type(self, event_type: str) -> list[ServerEvent]:
+        """Return recorded events of a given type."""
         return [event for _, event in self.events if event.type == event_type]
 
 
 class FakeResolver:
+    """Deterministic resolution backend for tests."""
+
     def __init__(self) -> None:
+        """Initialize the fake resolver state."""
         self.scenario = ""
         self.rounds = 0
 
     def set_genesis(self, scenario: str, guidance: str = "") -> None:
+        """Record the scenario."""
         self.scenario = scenario
 
     async def generate_initial_state(self) -> RoundResolution:
+        """Return a fixed initial state."""
         return RoundResolution(
             round_title="The Test Quest",
             global_narrative="Two adventurers stand at a gate.",
@@ -43,12 +55,14 @@ class FakeResolver:
         )
 
     async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
+        """Return a fixed start state."""
         return RoundResolution(
             global_narrative=f"{', '.join(player_names)} stand at a gate.",
             player_resolutions={},
         )
 
     async def generate_resolution(self, round_buffer: dict[str, str]) -> RoundResolution:
+        """Return a fixed resolution for the given actions."""
         self.rounds += 1
         return RoundResolution(
             round_title=f"Round {self.rounds}",
@@ -60,14 +74,17 @@ class FakeResolver:
 
 
 def password_digest(password: str, client_id: str) -> str:
+    """Compute the SHA-256 digest for a password and client id."""
     return hashlib.sha256(f"{password}{client_id}".encode()).hexdigest()
 
 
 def payload(event_type: str, **data: object) -> ClientPayload:
+    """Build a validated ClientPayload."""
     return ClientPayload.model_validate({"event_type": event_type, "data": data})
 
 
 async def build_started_game(tmp_path: Path) -> tuple[GameEngine, FakeSender, FakeResolver]:
+    """Build an engine with a started game."""
     sender = FakeSender()
     resolver = FakeResolver()
     engine = GameEngine(sender, resolver)
@@ -99,6 +116,8 @@ async def build_started_game(tmp_path: Path) -> tuple[GameEngine, FakeSender, Fa
 
 
 def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
+    """Verify a full round is strict, ordered and logged."""
+
     async def run() -> None:
         engine, sender, resolver = await build_started_game(tmp_path)
         assert engine.state is GameState.ACTIVE_TURN
@@ -131,6 +150,8 @@ def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
 
 
 def test_scenario_title_is_generated_before_game_start(tmp_path: Path) -> None:
+    """Verify the scenario title is generated before start."""
+
     async def run() -> None:
         sender = FakeSender()
         resolver = FakeResolver()
@@ -165,6 +186,8 @@ def test_scenario_title_is_generated_before_game_start(tmp_path: Path) -> None:
 
 
 def test_active_disconnect_injects_idle_and_advances(tmp_path: Path) -> None:
+    """Verify an active disconnect injects idle and advances the turn."""
+
     async def run() -> None:
         engine, sender, resolver = await build_started_game(tmp_path)
         await engine.process_payload("host", payload("action", action="Waits"))
@@ -185,6 +208,8 @@ def test_active_disconnect_injects_idle_and_advances(tmp_path: Path) -> None:
 
 
 def test_host_can_end_game_and_finalize_transcript(tmp_path: Path) -> None:
+    """Verify the host can end the game and finalize the transcript."""
+
     async def run() -> None:
         engine, sender, _ = await build_started_game(tmp_path)
 
@@ -205,6 +230,8 @@ def test_host_can_end_game_and_finalize_transcript(tmp_path: Path) -> None:
 
 
 def test_raw_password_is_rejected(tmp_path: Path) -> None:
+    """Reject a raw password instead of a digest."""
+
     async def run() -> None:
         sender = FakeSender()
         engine = GameEngine(sender, FakeResolver())
@@ -223,6 +250,8 @@ def test_raw_password_is_rejected(tmp_path: Path) -> None:
 
 
 def test_chat_remains_available_outside_turns(tmp_path: Path) -> None:
+    """Verify chat works outside turns."""
+
     async def run() -> None:
         engine, sender, _ = await build_started_game(tmp_path)
         await engine.process_payload("player", payload("chat", message="Ready!"))

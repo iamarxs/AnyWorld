@@ -52,6 +52,7 @@ class ServerConfig(BaseModel):
 
     @model_validator(mode="after")
     def passwords_must_differ(self) -> "ServerConfig":
+        """Reject a configuration where host and player passwords are equal."""
         if (
             self.host_password is not None
             and self.player_password is not None
@@ -85,6 +86,7 @@ class Settings(BaseSettings):
 
     @classmethod
     def load(cls, path: str | Path = DEFAULT_CONFIG_PATH) -> "Settings":
+        """Load and validate settings from a YAML file."""
         config_path = Path(path)
         try:
             with config_path.open("r", encoding="utf-8") as config_file:

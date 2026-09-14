@@ -2,6 +2,7 @@
 
 
 def clean_optional_text(value: object, field: str, maximum: int) -> str:
+    """Return a stripped string within the length limit, or an empty string for None."""
     if value is None:
         return ""
     if not isinstance(value, str):
@@ -13,6 +14,7 @@ def clean_optional_text(value: object, field: str, maximum: int) -> str:
 
 
 def clean_text(value: object, field: str, maximum: int) -> str:
+    """Return a stripped, non-empty string within the length limit."""
     if not isinstance(value, str):
         raise ValueError(f"'{field}' must be a string")
     cleaned = value.strip()

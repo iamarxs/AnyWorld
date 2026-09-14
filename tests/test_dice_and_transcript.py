@@ -9,6 +9,7 @@ from logic.transcript import GameTranscript
 
 
 def test_roll_d100_includes_both_boundaries(monkeypatch) -> None:
+    """Verify d100 roll boundaries and their descriptions."""
     monkeypatch.setattr(dice.secrets, "randbelow", lambda upper: 0)
     assert dice.roll_d100() == 0
 
@@ -19,6 +20,8 @@ def test_roll_d100_includes_both_boundaries(monkeypatch) -> None:
 
 
 def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:
+    """Verify HTML escaping and finalization of the transcript."""
+
     async def run() -> None:
         transcript = GameTranscript(tmp_path)
         await transcript.start("A <Quest>", "An & opening")

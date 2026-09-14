@@ -8,6 +8,7 @@ from api.server import app
 
 
 def test_index_and_static_assets_are_served() -> None:
+    """Serve the index page and static assets."""
     with TestClient(app) as client:
         index = client.get("/")
         script = client.get("/static/js/app.js")
@@ -22,6 +23,7 @@ def test_index_and_static_assets_are_served() -> None:
 
 
 def test_websocket_rejects_malformed_client_id() -> None:
+    """Reject a non-UUID client id on the WebSocket."""
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect) as exc_info:
             with client.websocket_connect("/ws/not-a-uuid"):

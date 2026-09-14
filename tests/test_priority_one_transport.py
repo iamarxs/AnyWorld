@@ -14,6 +14,7 @@ from test_engine import FakeResolver, password_digest
 
 
 def receive_until(socket, kind, predicate=lambda event: True):
+    """Receive events until one of the given kind and predicate arrives."""
     for _ in range(30):
         event = socket.receive_json()
         if event["type"] == kind and predicate(event):
@@ -22,6 +23,7 @@ def receive_until(socket, kind, predicate=lambda event: True):
 
 
 def authenticate(socket, client_id, name="Host", password=None, reconnect_token=None):
+    """Send an auth message for a client."""
     socket.send_json(
         {
             "event_type": "auth",
@@ -37,6 +39,7 @@ def authenticate(socket, client_id, name="Host", password=None, reconnect_token=
 
 
 def test_unauthenticated_socket_cannot_receive_broadcasts_or_use_existing_identity():
+    """Verify an unauthenticated socket cannot receive broadcasts or use an existing identity."""
     app = create_app(FakeResolver)
     host_id, pending_id = str(uuid4()), str(uuid4())
     with TestClient(app) as client:
@@ -67,6 +70,7 @@ def test_unauthenticated_socket_cannot_receive_broadcasts_or_use_existing_identi
 
 
 def test_password_alone_cannot_reclaim_an_existing_client_id():
+    """Verify a password alone cannot reclaim an existing client id."""
     app = create_app(FakeResolver)
     host_id = str(uuid4())
     with TestClient(app) as client:
@@ -86,6 +90,7 @@ def test_password_alone_cannot_reclaim_an_existing_client_id():
 
 
 def test_invalid_auth_attempt_limit_includes_malformed_json():
+    """Verify the invalid auth attempt limit includes malformed JSON."""
     settings.server.max_auth_attempts = 2
     with TestClient(create_app(FakeResolver)) as client:
         with client.websocket_connect(f"/ws/{uuid4()}") as socket:
@@ -99,6 +104,7 @@ def test_invalid_auth_attempt_limit_includes_malformed_json():
 
 
 def test_pending_connection_cap_and_deadline():
+    """Verify the pending connection cap and deadline."""
     settings.server.max_pending_connections = 1
     settings.server.auth_timeout_seconds = 0.1
     app = create_app(FakeResolver)
@@ -114,6 +120,7 @@ def test_pending_connection_cap_and_deadline():
 
 @pytest.mark.parametrize("host,player", [(None, "player"), ("host", None), ("same", "same")])
 def test_direct_asgi_startup_rejects_missing_or_equal_passwords(host, player):
+    """Verify direct ASGI startup rejects missing or equal passwords."""
     settings.server.host_password = host
     settings.server.player_password = player
     with pytest.raises(ValueError):
@@ -122,18 +129,26 @@ def test_direct_asgi_startup_rejects_missing_or_equal_passwords(host, player):
 
 
 def test_manager_pending_promotion_and_old_disconnect_do_not_affect_replacement():
+    """Verify pending promotion and old disconnect do not affect a replacement."""
+
     class Socket:
+        """Minimal fake WebSocket for the manager."""
+
         def __init__(self):
+            """Initialize the fake socket."""
             self.messages = []
             self.closed = False
 
         async def accept(self):
+            """Accept the socket."""
             pass
 
         async def send_text(self, text):
+            """Record a sent text."""
             self.messages.append(text)
 
         async def close(self, code=1000):
+            """Mark the socket closed."""
             self.closed = True
 
     async def run():

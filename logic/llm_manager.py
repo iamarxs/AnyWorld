@@ -26,6 +26,7 @@ class LLMContextManager:
     """Keep immutable genesis, durable memory and recent rounds within a budget."""
 
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
+        """Initialize the manager with an optional client and configured context."""
         self.client = client
         self._http: httpx.AsyncClient | None = None
         # A configured value is the fallback; successful llama.cpp discovery takes precedence.
@@ -79,6 +80,7 @@ class LLMContextManager:
         self.private_guidance = guidance
 
     async def generate_initial_state(self) -> RoundResolution:
+        """Generate the initial scenario state before players join."""
         logger.info("Generating initial scenario state")
         prompt = {
             "role": "user",
@@ -137,6 +139,7 @@ class LLMContextManager:
         dice_results: dict[str, int] | None = None,
         hidden_rolls: set[str] | None = None,
     ) -> RoundResolution:
+        """Resolve a round of actions into a coherent narrative outcome."""
         logger.info(
             "Generating resolution for %d actions (dice_results=%d)",
             len(round_buffer),
@@ -185,6 +188,7 @@ class LLMContextManager:
         )
 
     def _fixed_messages(self) -> list[dict[str, str]]:
+        """Return the immutable prefix messages for every request."""
         return [
             self.system_prompt,
             *([self.genesis_state] if self.genesis_state else []),
@@ -192,22 +196,27 @@ class LLMContextManager:
         ]
 
     def _output_limit(self, kind: str) -> int:
+        """Return the configured output token cap for a request kind."""
         return getattr(settings.llm, f"{kind}_output_tokens")
 
     def _schema_text(self, schema: type[BaseModel]) -> str:
+        """Return the compact JSON schema text for a response model."""
         return json.dumps(schema.model_json_schema(), ensure_ascii=False, separators=(",", ":"))
 
     def _estimate_input(self, messages: list[dict[str, str]], schema: type[BaseModel]) -> int:
+        """Estimate input tokens including schema framing and a safety margin."""
         # Reserve schema framing even on servers that compile it to a grammar outside
         # the prompt. The margin also covers unknown chat-template control tokens.
         return self._context_size(messages) + self._count_tokens(self._schema_text(schema)) + 64
 
     def _fits(self, count: int, kind: str) -> bool:
+        """Return whether a token count fits within the context budget."""
         return count + self._output_limit(kind) + settings.llm.token_safety_margin <= (
             self.context_window_size
         )
 
     async def _http_client(self) -> httpx.AsyncClient:
+        """Return a lazily-created HTTP client for backend discovery."""
         if self._http is None:
             self._http = httpx.AsyncClient(
                 timeout=2.0, headers={"Authorization": f"Bearer {settings.llm.api_key}"}
@@ -215,10 +224,12 @@ class LLMContextManager:
         return self._http
 
     def _backend_base(self) -> str:
+        """Return the backend base URL without a trailing /v1."""
         base = settings.llm.endpoint.rstrip("/")
         return base[:-3] if base.endswith("/v1") else base
 
     async def _input_tokens(self, messages: list[dict[str, str]], schema: type[BaseModel]) -> int:
+        """Count input tokens using the backend tokenizer or a conservative estimate."""
         if settings.llm.provider == "openai" and not self._encoding_loaded:
             self._encoding_loaded = True
             try:
@@ -282,6 +293,7 @@ class LLMContextManager:
         kind: str = "round",
         private_rolls: dict[str, int] | None = None,
     ) -> Any:
+        """Run a single LLM request, optionally compacting history and remembering the result."""
         await self.discover_context_window()
         if include_history:
             await self._compact_if_needed(prompt, schema, kind)
@@ -324,6 +336,7 @@ class LLMContextManager:
     async def _parse(
         self, messages: list[dict[str, str]], schema: type[BaseModel], kind: str
     ) -> Any:
+        """Send a request, parse and validate the structured response."""
         count = await self._input_tokens(messages, schema)
         if not self._fits(count, kind):
             raise LLMResolutionError(
@@ -437,6 +450,7 @@ class LLMContextManager:
             raise
 
     async def discover_context_window(self) -> None:
+        """Discover the backend context window size when available."""
         if self._context_discovered or settings.llm.provider != "compatible":
             return
         self._context_discovered = True
@@ -466,15 +480,18 @@ class LLMContextManager:
         return messages
 
     def _count_tokens(self, content: str) -> int:
+        """Count tokens in a string using the encoding or a byte estimate."""
         if self.encoding is not None:
             return len(self.encoding.encode(content, disallowed_special=()))
         # UTF-8 bytes are conservative for byte/subword tokenizers, unlike len/4.
         return len(content.encode("utf-8"))
 
     def _context_size(self, messages: list[dict[str, str]]) -> int:
+        """Estimate the total token size of a message list."""
         return 32 + sum(self._count_tokens(item["content"]) + 32 for item in messages)
 
     async def close(self) -> None:
+        """Close the OpenAI and HTTP clients."""
         if self.client is not None:
             await self.client.close()
             self.client = None

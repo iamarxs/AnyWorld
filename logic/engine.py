@@ -33,6 +33,7 @@ class GameEngine(LobbyMixin):
     }
 
     def __init__(self, sender: EventSender, resolver: ResolutionManager) -> None:
+        """Initialize the engine with its event sender and resolution backend."""
         self.sender, self.resolver = sender, resolver
         self.state = GameState.AWAITING_HOST
         self.players: dict[str, Player] = {}
@@ -55,11 +56,13 @@ class GameEngine(LobbyMixin):
         self.transcript = GameTranscript()
 
     def _job_current(self, epoch: int) -> bool:
+        """Return whether the job's epoch is current and the session has not ended."""
         return self.generation == epoch and self.state is not GameState.ENDED
 
     def _launch_job_locked(
         self, work: Callable[[int], Awaitable[None]], failure_state: GameState
     ) -> None:
+        """Start an owned inference task for the given work and failure state."""
         self.generation += 1
         self.state = GameState.AWAITING_LLM
         self.round_paused = False
@@ -70,6 +73,7 @@ class GameEngine(LobbyMixin):
     async def _run_job(
         self, work: Callable[[int], Awaitable[None]], epoch: int, failure_state: GameState
     ) -> None:
+        """Run an owned inference job, handling failures and cleanup."""
         try:
             async with self.effects_lock:
                 if not self._job_current(epoch):
@@ -122,6 +126,7 @@ class GameEngine(LobbyMixin):
             await asyncio.gather(task, return_exceptions=True)
 
     async def shutdown(self, *, close_resolver: bool = True) -> None:
+        """Terminate the session, cancel inference and finalize the transcript."""
         async with self.effects_lock:
             async with self.lock:
                 already_ended = self.state is GameState.ENDED
@@ -154,6 +159,7 @@ class GameEngine(LobbyMixin):
         expected_version: int | None = None,
         still_disconnected: Callable[[], bool] = lambda: True,
     ) -> None:
+        """Mark a player disconnected and advance or idle the active turn."""
         async with self.effects_lock:
             async with self.lock:
                 player = self.players.get(client_id)
@@ -187,6 +193,7 @@ class GameEngine(LobbyMixin):
                 await self.sender.broadcast_global(directive)
 
     def _action_allowed(self, client_id: str) -> None:
+        """Raise if the client cannot submit an action in the current state."""
         player = self.players.get(client_id)
         if player is None or not player.is_connected:
             raise ValueError("Authenticate before submitting an action.")
@@ -196,6 +203,7 @@ class GameEngine(LobbyMixin):
             raise ValueError("It is not your turn.")
 
     async def _submit_action(self, client_id: str, data: dict[str, object]) -> None:
+        """Validate and buffer a player action, launching a round when complete."""
         action = clean_text(data.get("action"), "action", 4_000)
         async with self.lock:
             if not CURRENT_OWNER.get()():
@@ -241,6 +249,7 @@ class GameEngine(LobbyMixin):
                 await self.sender.broadcast_global(directive)
 
     def _next_turn_locked(self) -> ServerEvent | None:
+        """Advance the turn queue and return a directive for the next active player."""
         if self.state is not GameState.ACTIVE_TURN:
             return None
         if not any(player.is_connected for player in self.players.values()):
@@ -271,6 +280,7 @@ class GameEngine(LobbyMixin):
         return None
 
     def _submitted_actions_locked(self) -> dict[str, str]:
+        """Return non-idle actions keyed by player name."""
         return {
             self.players[client_id].name: action
             for client_id, action in self.round_buffer.items()
@@ -278,12 +288,14 @@ class GameEngine(LobbyMixin):
         }
 
     def _take_complete_round_locked(self) -> dict[str, str] | None:
+        """Return the round's actions when every player has submitted."""
         if not self.players or len(self.round_buffer) != len(self.players):
             return None
         self.state = GameState.AWAITING_LLM
         return dict(self.round_buffer)
 
     def _launch_round_locked(self, actions: dict[str, str], *, retry: bool = False) -> None:
+        """Prepare and launch a round resolution job from buffered actions."""
         if not retry:
             participants = {
                 item: (
@@ -307,6 +319,7 @@ class GameEngine(LobbyMixin):
         self._launch_job_locked(self._resolve_round, GameState.AWAITING_LLM)
 
     async def _retry_round(self, client_id: str, data: dict[str, object]) -> None:
+        """Re-run a paused round with its retained actions and dice."""
         del data
         async with self.lock:
             if not CURRENT_OWNER.get()():
@@ -321,6 +334,7 @@ class GameEngine(LobbyMixin):
             self._launch_round_locked(self.round_buffer.copy(), retry=True)
 
     async def _resolve_round(self, epoch: int) -> None:
+        """Run dice planning and resolution, then commit the round outcome."""
         pending = self.pending_resolution
         assert pending is not None
         actions = pending["actions"]
@@ -419,6 +433,7 @@ class GameEngine(LobbyMixin):
                 await self.sender.broadcast_global(directive)
 
     async def _publish_usage(self, client_id: str | None = None) -> None:
+        """Broadcast or send the latest token usage event."""
         tokens = getattr(self.resolver, "last_token_usage", None)
         if tokens is None:
             return
@@ -436,6 +451,7 @@ class GameEngine(LobbyMixin):
             await self.sender.send_personal(client_id, event)
 
     async def _send_error(self, client_id: str, message: str) -> None:
+        """Send a personal error event to a client."""
         await self.sender.send_personal(
             client_id, ServerEvent(type="error", payload={"msg": message})
         )

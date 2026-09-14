@@ -7,6 +7,7 @@ from core.config import LLMConfig, ServerConfig, settings
 
 @pytest.fixture(autouse=True)
 def isolated_settings(monkeypatch):
+    """Replace the global settings with isolated test values."""
     monkeypatch.setattr(
         settings,
         "server",

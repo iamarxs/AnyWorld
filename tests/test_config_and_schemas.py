@@ -11,6 +11,7 @@ from logic.llm_manager import LLMContextManager, LLMResolutionError
 
 
 def test_settings_loads_typed_yaml(tmp_path: Path) -> None:
+    """Load a valid YAML config into typed settings."""
     config = tmp_path / "config.yaml"
     config.write_text(
         """
@@ -37,6 +38,7 @@ llm:
 
 
 def test_settings_reports_malformed_yaml(tmp_path: Path) -> None:
+    """Report malformed YAML as a ConfigLoadError."""
     config = tmp_path / "config.yaml"
     config.write_text("server: [broken", encoding="utf-8")
 
@@ -45,6 +47,7 @@ def test_settings_reports_malformed_yaml(tmp_path: Path) -> None:
 
 
 def test_settings_strictly_rejects_wrong_types(tmp_path: Path) -> None:
+    """Reject wrong YAML types under strict validation."""
     config = tmp_path / "config.yaml"
     config.write_text('server:\n  port: "9000"\n', encoding="utf-8")
 
@@ -53,6 +56,7 @@ def test_settings_strictly_rejects_wrong_types(tmp_path: Path) -> None:
 
 
 def test_websocket_and_resolution_schemas_are_strict() -> None:
+    """Validate strict websocket and resolution schemas."""
     payload = ClientPayload(event_type="action", data={"action": "wait"})
     resolution = RoundResolution(
         round_title=None,
@@ -67,6 +71,7 @@ def test_websocket_and_resolution_schemas_are_strict() -> None:
 
 
 def test_context_overflow_preserves_history_without_fifo_loss() -> None:
+    """Preserve history when a bounded check overflows the budget."""
     manager = LLMContextManager()
     manager.context_window_size = 128_000
     manager.set_genesis("A short beginning")

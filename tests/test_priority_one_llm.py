@@ -13,7 +13,10 @@ from logic.llm_manager import LLMContextManager, LLMResolutionError
 
 
 class FakeClient:
+    """Fake OpenAI client that returns a configured result."""
+
     def __init__(self, result=None, finish_reason="stop"):
+        """Initialize the fake client."""
         self.calls = []
         self.result = result
         self.finish_reason = finish_reason
@@ -23,6 +26,7 @@ class FakeClient:
         )
 
     async def parse(self, **kwargs):
+        """Record the call and return a configured result."""
         self.calls.append(kwargs)
         result = self.result
         if callable(result):
@@ -51,10 +55,12 @@ class FakeClient:
         )
 
     async def close(self):
+        """Record the close."""
         self.closed = True
 
 
 def memory():
+    """Return a sample durable memory summary."""
     return ContextSummary(
         world_state="The north gate remains locked. The vial was consumed.",
         player_states={"Alice": "Broken wrist; carries the brass key; at the north gate."},
@@ -80,6 +86,8 @@ def memory():
     ],
 )
 def test_every_request_caps_output_and_counts_backend_template(schema, kind, provider, cap_key):
+    """Verify every request caps output and counts the backend template."""
+
     async def run():
         settings.llm.provider = provider
         client = FakeClient()
@@ -121,6 +129,8 @@ def test_every_request_caps_output_and_counts_backend_template(schema, kind, pro
     ],
 )
 def test_schema_output_and_margin_can_reject_a_short_message(kind, schema):
+    """Verify schema output and margin can reject a short message."""
+
     async def run():
         client = FakeClient()
         manager = LLMContextManager(client)
@@ -133,6 +143,8 @@ def test_schema_output_and_margin_can_reject_a_short_message(kind, schema):
 
 
 def test_unknown_backend_uses_utf8_bytes_and_keeps_small_slot_context():
+    """Verify an unknown backend uses UTF-8 bytes and keeps a small slot context."""
+
     async def run():
         settings.llm.provider = "compatible"
         client = FakeClient()
@@ -166,6 +178,8 @@ def test_unknown_backend_uses_utf8_bytes_and_keeps_small_slot_context():
 
 
 def test_large_scenario_is_rejected_before_inference():
+    """Verify a large scenario is rejected before inference."""
+
     async def run():
         client = FakeClient()
         manager = LLMContextManager(client)
@@ -178,6 +192,8 @@ def test_large_scenario_is_rejected_before_inference():
 
 
 def test_aggregate_preflight_rejects_without_mutating_memory():
+    """Verify an aggregate preflight rejects without mutating memory."""
+
     async def run():
         client = FakeClient()
         manager = LLMContextManager(client)
@@ -192,6 +208,8 @@ def test_aggregate_preflight_rejects_without_mutating_memory():
 
 
 def test_large_next_action_triggers_summary_and_repeated_memory_survives():
+    """Verify a large next action triggers a summary and repeated memory survives."""
+
     async def run():
         client = FakeClient()
         manager = LLMContextManager(client)
@@ -229,6 +247,8 @@ def test_large_next_action_triggers_summary_and_repeated_memory_survives():
     ],
 )
 def test_failed_empty_or_expanding_summary_preserves_original(result):
+    """Verify a failed, empty or expanding summary preserves the original."""
+
     async def run():
         client = FakeClient(result)
         manager = LLMContextManager(client)
@@ -249,6 +269,8 @@ def test_failed_empty_or_expanding_summary_preserves_original(result):
 
 
 def test_truncation_does_not_enter_history():
+    """Verify truncation does not enter the history."""
+
     async def run():
         manager = LLMContextManager(FakeClient(finish_reason="length"))
         with pytest.raises(LLMResolutionError, match="token limit"):
@@ -259,6 +281,8 @@ def test_truncation_does_not_enter_history():
 
 
 def test_planner_sees_private_guidance_durable_facts_and_recent_changes():
+    """Verify the planner sees private guidance, durable facts and recent changes."""
+
     async def run():
         client = FakeClient()
         manager = LLMContextManager(client)
@@ -292,6 +316,8 @@ def test_planner_sees_private_guidance_durable_facts_and_recent_changes():
     "leak", ["Alice rolled 17 on a secret check.", "The invisible alarm triggers behind the gate."]
 )
 def test_public_output_leaking_secret_roll_or_guidance_is_rejected(leak):
+    """Verify public output leaking a secret roll or guidance is rejected."""
+
     async def run():
         client = FakeClient(
             RoundResolution(global_narrative=leak, player_resolutions={"Alice": "Alice waits."})
@@ -306,6 +332,8 @@ def test_public_output_leaking_secret_roll_or_guidance_is_rejected(leak):
 
 
 def test_request_timeout_preserves_history():
+    """Verify a request timeout preserves the history."""
+
     async def run():
         settings.llm.request_timeout_seconds = 0.01
         client = FakeClient()
@@ -323,6 +351,8 @@ def test_request_timeout_preserves_history():
 
 
 def test_cancelling_compaction_keeps_original_memory_and_history():
+    """Verify cancelling compaction keeps the original memory and history."""
+
     async def run():
         entered = asyncio.Event()
         client = FakeClient()

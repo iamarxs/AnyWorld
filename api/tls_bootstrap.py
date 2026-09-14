@@ -1,4 +1,5 @@
-# tls_bootstrap.py
+"""Self-signed TLS certificate bootstrap for IP-based server discovery."""
+
 import datetime
 import ipaddress
 import logging
@@ -42,6 +43,7 @@ def get_external_ip() -> str:
 
 
 def _cert_covers_ip_and_is_fresh(ip: str) -> bool:
+    """Return whether the existing certificate covers the IP and is not expiring soon."""
     if not (CERT_PATH.exists() and KEY_PATH.exists()):
         return False
     cert = x509.load_pem_x509_certificate(CERT_PATH.read_bytes())
@@ -58,6 +60,7 @@ def _cert_covers_ip_and_is_fresh(ip: str) -> bool:
 
 
 def _generate_cert(ip: str) -> None:
+    """Generate a self-signed certificate and key covering the given IP."""
     CERT_DIR.mkdir(exist_ok=True)
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=4096)

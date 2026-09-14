@@ -14,7 +14,10 @@ from test_engine import FakeResolver, FakeSender, password_digest, payload
 
 
 class ControlledResolver(FakeResolver):
+    """Resolver that can block, fail and record inference phases."""
+
     def __init__(self):
+        """Initialize the controlled resolver state."""
         super().__init__()
         self.block_phase = None
         self.entered = asyncio.Event()
@@ -29,6 +32,7 @@ class ControlledResolver(FakeResolver):
         self.closed = False
 
     async def gate(self, phase):
+        """Block at the given phase until released or cancelled."""
         if self.block_phase != phase:
             return
         self.entered.set()
@@ -41,14 +45,17 @@ class ControlledResolver(FakeResolver):
                 raise
 
     async def generate_initial_state(self):
+        """Gate the initial state generation."""
         await self.gate("initial")
         return await super().generate_initial_state()
 
     async def generate_start_state(self, names):
+        """Gate the start state generation."""
         await self.gate("start")
         return await super().generate_start_state(names)
 
     async def plan_dice(self, actions, current_state=""):
+        """Return a dice plan, optionally failing."""
         self.plans += 1
         await self.gate("dice")
         if self.fail_plan:
@@ -59,6 +66,7 @@ class ControlledResolver(FakeResolver):
         )
 
     async def generate_resolution(self, actions, dice_results=None, hidden_rolls=None):
+        """Return a resolution, optionally failing."""
         self.received_rolls.append(dict(dice_results or {}))
         self.received_actions.append(dict(actions))
         await self.gate("round")
@@ -70,10 +78,12 @@ class ControlledResolver(FakeResolver):
         )
 
     async def close(self):
+        """Record the close."""
         self.closed = True
 
 
 async def auth(engine, who):
+    """Authenticate a client against the engine."""
     password = settings.server.host_password if who == "host" else settings.server.player_password
     await engine.process_payload(
         who,
@@ -87,6 +97,7 @@ async def auth(engine, who):
 
 
 async def setup(tmp_path, phase=None):
+    """Build an engine advanced to the given phase."""
     resolver = ControlledResolver()
     sender = FakeSender()
     engine = GameEngine(sender, resolver)
@@ -110,6 +121,7 @@ async def setup(tmp_path, phase=None):
 
 
 async def submit_round(engine):
+    """Submit a full round of actions."""
     await engine.process_payload("host", payload("action", action="Open gate"))
     await engine.process_payload("player", payload("action", action="Watch Mira"))
 
@@ -117,6 +129,8 @@ async def submit_round(engine):
 @pytest.mark.parametrize("phase", ["initial", "start", "dice", "round"])
 @pytest.mark.parametrize("after_cancel", ["cancel", "success", "failure"])
 def test_end_during_every_phase_is_terminal_and_chat_is_responsive(tmp_path, phase, after_cancel):
+    """Verify ending during any phase is terminal and chat stays responsive."""
+
     async def run():
         engine, sender, resolver = await setup(tmp_path, phase)
         resolver.after_cancel = after_cancel
@@ -148,6 +162,8 @@ def test_end_during_every_phase_is_terminal_and_chat_is_responsive(tmp_path, pha
 
 
 def test_failed_plan_pauses_without_unchecked_resolution_and_can_retry(tmp_path):
+    """Verify a failed plan pauses and can be retried."""
+
     async def run():
         engine, sender, resolver = await setup(tmp_path)
         resolver.fail_plan = True
@@ -166,6 +182,8 @@ def test_failed_plan_pauses_without_unchecked_resolution_and_can_retry(tmp_path)
 
 
 def test_failed_resolution_retries_identical_rolls_and_keeps_hidden_checks_private(tmp_path):
+    """Verify a failed resolution retries with the same rolls and keeps hidden checks private."""
+
     async def run():
         engine, sender, resolver = await setup(tmp_path)
         resolver.hidden = True
@@ -193,6 +211,8 @@ def test_failed_resolution_retries_identical_rolls_and_keeps_hidden_checks_priva
 @pytest.mark.parametrize("during_inference", [False, True])
 @pytest.mark.parametrize("first_return", ["host", "player"])
 def test_all_disconnected_resume_exactly_one_turn(tmp_path, during_inference, first_return):
+    """Verify a fully disconnected game resumes with exactly one turn."""
+
     async def run():
         engine, sender, resolver = await setup(tmp_path)
         if during_inference:
@@ -218,6 +238,8 @@ def test_all_disconnected_resume_exactly_one_turn(tmp_path, during_inference, fi
 
 
 def test_new_connection_transitions_survive_older_round_commit(tmp_path):
+    """Verify a new connection's transitions survive an older round commit."""
+
     async def run():
         engine, _, resolver = await setup(tmp_path)
         await engine.handle_disconnect("player")
@@ -240,6 +262,8 @@ def test_new_connection_transitions_survive_older_round_commit(tmp_path):
 
 
 def test_rejected_preflight_keeps_active_turn_and_unlocks_client(tmp_path):
+    """Verify a rejected preflight keeps the active turn and unlocks the client."""
+
     async def run():
         engine, sender, resolver = await setup(tmp_path)
 
@@ -257,6 +281,8 @@ def test_rejected_preflight_keeps_active_turn_and_unlocks_client(tmp_path):
 
 
 def test_end_waits_for_committed_transcript_write_then_finalizes(tmp_path):
+    """Verify ending waits for a committed transcript write before finalizing."""
+
     async def run():
         engine, sender, _ = await setup(tmp_path)
         entered, release = threading.Event(), threading.Event()
@@ -286,6 +312,8 @@ def test_end_waits_for_committed_transcript_write_then_finalizes(tmp_path):
 
 
 def test_cancelled_transcript_write_cannot_be_overtaken_by_finalization(tmp_path):
+    """Verify a cancelled transcript write cannot be overtaken by finalization."""
+
     async def run():
         transcript = GameTranscript(tmp_path)
         await transcript.start("Gate", "Opening")
