@@ -17,6 +17,7 @@ class GameTranscript:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.path: Path | None = None
         self._finalized = False
+        self._io_lock = asyncio.Lock()
 
     async def start(self, title: str, initial_state: str) -> None:
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")
@@ -43,12 +44,11 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
 </style></head><body><header><h1>Anyworld - {escape(title)}</h1><h2>Opening state</h2>
 <p class="state">{escape(initial_state)}</p></header><main>
 """
-        await asyncio.to_thread(self._append, document)
+        await self._write(document)
 
     async def append_round(
         self,
         number: int,
-        previous_state: str,
         actions: dict[str, str],
         resolution: RoundResolution,
         dice_results: dict[str, int] | None = None,
@@ -66,13 +66,13 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
             for name, result in resolution.player_resolutions.items()
         )
         dice_section = self._render_dice_section(dice_results)
-        section = f"""<article><h2>Round {number}</h2><h3>Prior state</h3>
-<p class="state">{escape(previous_state)}</p><h3>Player actions</h3><dl>{actions_html}</dl>
+        section = f"""<article><h2>Round {number}</h2>
+<h3>Player actions</h3><dl>{actions_html}</dl>
 {dice_section}
 <h3>Results</h3><dl>{results_html}</dl><h3>Resulting state</h3>
 <p class="state">{escape(resolution.global_narrative)}</p></article>
 """
-        await asyncio.to_thread(self._append, section)
+        await self._write(section)
 
     @staticmethod
     def _render_dice_section(dice_results: dict[str, int] | None) -> str:
@@ -92,9 +92,27 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
     async def finalize(self, reason: str = "The host ended the game.") -> None:
         if self.path is None or self._finalized:
             return
-        self._finalized = True
         ending = f"</main><footer><p>{escape(reason)}</p></footer></body></html>\n"
-        await asyncio.to_thread(self._append, ending)
+        await self._write(ending, final=True)
+
+    async def _write(self, text: str, *, final: bool = False) -> None:
+        async with self._io_lock:
+            if self._finalized:
+                if final:
+                    return
+                raise RuntimeError("Transcript has already been finalized")
+            # Cancelling to_thread does not stop its underlying write. Keep the lock
+            # until that write finishes so finalization cannot overtake it.
+            work = asyncio.create_task(asyncio.to_thread(self._append, text))
+            try:
+                await asyncio.shield(work)
+            except asyncio.CancelledError:
+                await work
+                if final:
+                    self._finalized = True
+                raise
+            if final:
+                self._finalized = True
 
     def _append(self, text: str) -> None:
         if self.path is None:
