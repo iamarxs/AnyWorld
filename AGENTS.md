@@ -1,6 +1,7 @@
 # Anyworld (ArtificialDungeon): current maintenance guide
 
-This section describes current implementation; differences from the original requirements are not automatically approved product changes. Proposed fixes belong in TASKS.md.
+This section describes current implementation; differences from the original requirements are not
+automatically approved product changes. Proposed fixes belong in TASKS.md.
 
 ## Working conventions
 
@@ -85,12 +86,11 @@ Token bounds are currently estimates, not guarantees. When improving this subsys
 - Validate coherence and total tokens/latency/cache reuse with the deployed backend. Cache options
   are provider/version-specific; do not claim percentage savings without measurements.
 
-## UI differences and validation
+## UI
 
 Current desktop columns are 20% chat / 80% game, with 3% title / 92% combined log / 5% input rows.
-There is no separate 25% state pane. Mobile <=700px stacks title/log/chat/input. The log is capped
-at 500 DOM entries (chat at 300), and snapshots do not replay full history. These differ from the
-original separate-state-pane and scroll-to-start requirements; see TASKS.md for reconciliation.
+Mobile <=700px stacks title/log/chat/input. The log is capped at 500 DOM entries (chat at 300),
+and snapshots do not replay full history.
 
 For normal implementation work: `black --check app.py api core logic tests`,
 `flake8 app.py api core logic tests`, and `pytest`. Use fake resolvers and temporary transcripts.
