@@ -55,13 +55,13 @@ are not advertised as exact. The token indicator's tooltip describes the countin
 Optional limits under `llm` (defaults shown) apply to every model call, including summaries:
 
 ```yaml
-  initial_output_tokens: 1024
-  round_output_tokens: 2048
-  dice_output_tokens: 512
-  summary_output_tokens: 1024
-  token_safety_margin: 256
-  request_timeout_seconds: 120.0
-  max_retries: 1
+initial_output_tokens: 1024
+round_output_tokens: 2048
+dice_output_tokens: 512
+summary_output_tokens: 1024
+token_safety_margin: 256
+request_timeout_seconds: 120.0
+max_retries: 1
 ```
 
 Choose caps that leave sufficient input capacity within the effective backend context, especially
@@ -131,7 +131,7 @@ Inspired by the game **AI Dungeon**, especially its earlier, free web-based inca
 
 ## AI Credits
 
-Qwen 3.8 27b and OpenAI's Luna model assisted in the production of this app.
+Qwen 3.8 27b and OpenAI's Luna and Astra models assisted in the production of this app.
 
 ## Quality checks
 
