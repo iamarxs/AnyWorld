@@ -3,11 +3,12 @@
 import hashlib
 import hmac
 import logging
+from collections.abc import Callable
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from core.config import settings
 from core.schemas import ClientPayload, ServerEvent
-from logic.llm_manager import LLMResolutionError
 from logic.models import GameState, Player
 from logic.validation import clean_optional_text, clean_text
 
@@ -15,101 +16,140 @@ if TYPE_CHECKING:
     from logic.engine import GameEngine
 
 LOGGER = logging.getLogger(__name__)
+CURRENT_OWNER: ContextVar[Callable[[], bool]] = ContextVar("socket_owner", default=lambda: True)
 
 
 class LobbyMixin:
-    """Lobby operations mixed into GameEngine to keep modules focused."""
+    """Lobby operations; authentication can atomically activate a transport connection."""
 
-    async def process_payload(self: "GameEngine", client_id: str, payload: ClientPayload) -> None:
+    async def process_payload(
+        self: "GameEngine",
+        client_id: str,
+        payload: ClientPayload,
+        *,
+        authorize: Callable[[], bool] = lambda: True,
+    ) -> None:
+        token = CURRENT_OWNER.set(authorize)
         try:
+            if not authorize():
+                return
             handler = getattr(self, self.PAYLOAD_HANDLERS[payload.event_type])
             await handler(client_id, payload.data)
         except ValueError as exc:
             await self._send_error(client_id, str(exc))
+            if payload.event_type == "action":
+                async with self.effects_lock:
+                    async with self.lock:
+                        directive = (
+                            self._next_turn_locked()
+                            if authorize() and self.active_player_id == client_id
+                            else None
+                        )
+                    if directive is not None:
+                        await self.sender.send_personal(client_id, directive)
+        finally:
+            CURRENT_OWNER.reset(token)
 
-    async def _authenticate(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
+    async def _authenticate(
+        self: "GameEngine",
+        client_id: str,
+        data: dict[str, object],
+        *,
+        activate: Callable[[], None] | None = None,
+    ) -> bool:
         name = clean_text(data.get("name"), "name", 40)
-        password_digest = clean_text(data.get("password_digest"), "password_digest", 64)
-        if len(password_digest) != 64 or any(
-            char not in "0123456789abcdef" for char in password_digest
-        ):
+        digest = clean_text(data.get("password_digest"), "password_digest", 64)
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             raise ValueError("'password_digest' must be a lowercase SHA-256 digest")
-        error: str | None = None
-        rejoined = False
+        directive = None
+        actions = None
         async with self.lock:
             existing = self.players.get(client_id)
             if existing is not None:
                 expected = (
                     settings.server.host_password
                     if existing.is_host
-                    else settings.server.player_password
+                    else (settings.server.player_password)
                 )
-                if not self._password_matches(password_digest, expected, client_id):
-                    error = "Invalid password for this session."
-                else:
-                    existing.is_connected = True
+                if not self._password_matches(digest, expected, client_id):
+                    raise ValueError("Invalid password for this session.")
+                reconnect_token = data.get("reconnect_token")
+                if not isinstance(reconnect_token, str) or not hmac.compare_digest(
+                    reconnect_token, existing.reconnect_token
+                ):
+                    raise ValueError("Invalid reconnect token for this session.")
+            elif self.state is GameState.AWAITING_HOST:
+                if not self._password_matches(digest, settings.server.host_password, client_id):
+                    raise ValueError("The host must join first with the host password.")
+            else:
+                if self.state is not GameState.AWAITING_PLAYERS:
+                    raise ValueError("The game is not accepting new players.")
+                if not self._password_matches(digest, settings.server.player_password, client_id):
+                    raise ValueError("Invalid player password.")
+                if len(self.players) >= settings.server.max_players:
+                    raise ValueError("Server is at maximum capacity.")
+                if any(p.name.casefold() == name.casefold() for p in self.players.values()):
+                    raise ValueError("That player name is already in use.")
+
+            # Synchronous callback: socket promotion and domain authentication share the
+            # same critical section. Invalid credentials never replace the old socket.
+            if activate is not None:
+                activate()
+            rejoined = existing is not None
+            if existing is not None:
+                if not existing.is_connected:
+                    existing.connection_version += 1
                     if self.state in {GameState.ACTIVE_TURN, GameState.AWAITING_LLM}:
                         existing.return_pending = True
-                    name = existing.name
-                    rejoined = True
-            elif self.state is GameState.AWAITING_HOST:
-                if not self._password_matches(
-                    password_digest, settings.server.host_password, client_id
-                ):
-                    error = "The host must join first with the host password."
-                else:
-                    player = Player(client_id, name, True, join_index=len(self.join_order))
-                    self.players[client_id] = player
-                    self.join_order.append(client_id)
-                    self.turn_queue.append(client_id)
-                    self.state = GameState.SCENARIO_INJECTION
-            elif self.state not in {
-                GameState.SCENARIO_INJECTION,
-                GameState.AWAITING_PLAYERS,
-            }:
-                error = "The game has already started."
-            elif not self._password_matches(
-                password_digest, settings.server.player_password, client_id
-            ):
-                error = "Invalid player password."
-            elif self.state is GameState.SCENARIO_INJECTION:
-                error = "The host is still creating the scenario."
-            elif len(self.players) >= settings.server.max_players:
-                error = "Server is at maximum capacity."
-            elif any(player.name.casefold() == name.casefold() for player in self.players.values()):
-                error = "That player name is already in use."
+                existing.is_connected = True
+                name = existing.name
+                player = existing
             else:
-                player = Player(client_id, name, False, join_index=len(self.join_order))
+                player = Player(
+                    client_id,
+                    name,
+                    self.state is GameState.AWAITING_HOST,
+                    join_index=len(self.join_order),
+                )
                 self.players[client_id] = player
                 self.join_order.append(client_id)
                 self.turn_queue.append(client_id)
-
-            player = self.players.get(client_id)
-            snapshot = self._snapshot_locked(player) if player is not None else None
-
-        if error is not None:
-            await self._send_error(client_id, error)
-            return
-        assert snapshot is not None
+                if player.is_host:
+                    self.state = GameState.SCENARIO_INJECTION
+            if self.state is GameState.ACTIVE_TURN and (
+                self.active_player_id is None
+                or not self.players[self.active_player_id].is_connected
+            ):
+                directive = self._next_turn_locked()
+                actions = self._take_complete_round_locked()
+                if actions is not None:
+                    self._launch_round_locked(actions)
+            snapshot = self._snapshot_locked(player)
         await self.sender.send_personal(client_id, ServerEvent(type="auth_ok", payload=snapshot))
         verb = "rejoined" if rejoined else "connected"
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": f"{name} {verb}."})
         )
         await self.sender.broadcast_except(client_id, self._player_roster_event())
+        if directive is not None:
+            await self.sender.broadcast_global(directive)
+        return True
 
     @staticmethod
-    def _password_matches(digest: str, password: str, client_id: str) -> bool:
+    def _password_matches(digest: str, password: str | None, client_id: str) -> bool:
+        if not password:
+            return False
         expected = hashlib.sha256(f"{password}{client_id}".encode()).hexdigest()
         return hmac.compare_digest(digest, expected)
 
     async def _chat(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         message = clean_text(data.get("message"), "message", 1_000)
         async with self.lock:
+            if not CURRENT_OWNER.get()():
+                return
             player = self.players.get(client_id)
-        if player is None or not player.is_connected:
-            await self._send_error(client_id, "Authenticate before chatting.")
-            return
+            if player is None or not player.is_connected:
+                raise ValueError("Authenticate before chatting.")
         await self.sender.broadcast_global(
             ServerEvent(type="chat_echo", payload={"name": player.name, "chat": message})
         )
@@ -120,137 +160,92 @@ class LobbyMixin:
         scenario = clean_text(data.get("scenario"), "scenario", 20_000)
         guidance = clean_optional_text(data.get("guidance"), "guidance", 5_000)
         async with self.lock:
+            if not CURRENT_OWNER.get()():
+                return
             player = self.players.get(client_id)
             if player is None or not player.is_host:
-                error = "Only the host can initialize the scenario."
-            elif self.state is not GameState.SCENARIO_INJECTION:
-                error = "The scenario cannot be changed in the current state."
-            else:
-                error = None
-                self.state = GameState.AWAITING_LLM
-        if error is not None:
-            await self._send_error(client_id, error)
-            return
+                raise ValueError("Only the host can initialize the scenario.")
+            if self.state is not GameState.SCENARIO_INJECTION:
+                raise ValueError("The scenario cannot be changed in the current state.")
+            self._launch_job_locked(
+                lambda epoch: self._prepare_scenario(epoch, client_id, scenario, guidance),
+                GameState.SCENARIO_INJECTION,
+            )
 
-        # Store only the scenario text for clients; DM guidance remains resolver-only.
-        async with self.lock:
-            self.original_scenario = scenario
-        try:
-            self.resolver.set_genesis(scenario, guidance)
-        except TypeError as exc:
-            # Preserve compatibility with lightweight resolver adapters that predate guidance.
-            if "positional" not in str(exc) and "argument" not in str(exc):
-                raise
-            self.resolver.set_genesis(scenario)
-        try:
-            initial_resolution = await self.resolver.generate_initial_state()
-        except (LLMResolutionError, AttributeError) as exc:
-            LOGGER.exception("Initial scenario state generation failed")
+    async def _prepare_scenario(
+        self: "GameEngine", epoch: int, client_id: str, scenario: str, guidance: str
+    ) -> None:
+        self.resolver.set_genesis(scenario, guidance)
+        resolution = await self.resolver.generate_initial_state()
+        async with self.effects_lock:
             async with self.lock:
-                self.state = GameState.SCENARIO_INJECTION
-            await self._send_error(client_id, f"Could not prepare scenario: {exc}")
-            return
-        async with self.lock:
-            self.scenario_title = initial_resolution.round_title or "Untitled Session"
-            self.current_scenario_state = initial_resolution.global_narrative
-            self.state = GameState.AWAITING_PLAYERS
-        await self.sender.send_personal(
-            client_id,
-            ServerEvent(type="scenario_ready", payload={"title": self.scenario_title}),
-        )
-        token_usage = getattr(self.resolver, "last_token_usage", None)
-        if token_usage is not None:
-            discover = getattr(self.resolver, "discover_context_window", None)
-            if discover is not None:
-                await discover()
+                if not self._job_current(epoch):
+                    return
+                self.original_scenario = scenario
+                self.scenario_title = resolution.round_title or "Untitled Session"
+                self.current_scenario_state = resolution.global_narrative
+                self.state = GameState.AWAITING_PLAYERS
             await self.sender.send_personal(
                 client_id,
-                ServerEvent(
-                    type="token_usage",
-                    payload={
-                        "approximate_tokens": token_usage,
-                        "context_window_size": getattr(self.resolver, "context_window_size", 8_192),
-                    },
-                ),
+                ServerEvent(type="scenario_ready", payload={"title": self.scenario_title}),
             )
+            await self._publish_usage(client_id)
 
     async def _start_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         del data
-        title = "Untitled Session"
         async with self.lock:
+            if not CURRENT_OWNER.get()():
+                return
             player = self.players.get(client_id)
             if player is None or not player.is_host:
-                error = "Only the host can start the game."
-            elif self.state is not GameState.AWAITING_PLAYERS:
-                error = "The game cannot be started in the current state."
-            else:
-                error = None
-                self.state = GameState.AWAITING_LLM
-                player_names = [self.players[player_id].name for player_id in self.join_order]
-                title = self.scenario_title
-        if error is not None:
-            await self._send_error(client_id, error)
-            return
+                raise ValueError("Only the host can start the game.")
+            if self.state is not GameState.AWAITING_PLAYERS:
+                raise ValueError("The game cannot be started in the current state.")
+            names = [self.players[item].name for item in self.join_order]
+            self._launch_job_locked(
+                lambda epoch: self._prepare_start(epoch, names), GameState.AWAITING_PLAYERS
+            )
 
-        try:
-            start_resolution = await self.resolver.generate_start_state(player_names)
-        except (LLMResolutionError, AttributeError) as exc:
-            LOGGER.exception("Player introduction generation failed")
+    async def _prepare_start(self: "GameEngine", epoch: int, names: list[str]) -> None:
+        resolution = await self.resolver.generate_start_state(names)
+        async with self.effects_lock:
             async with self.lock:
-                self.state = GameState.AWAITING_PLAYERS
-            await self._send_error(client_id, f"Could not start game: {exc}")
-            return
-
-        async with self.lock:
-            self.current_scenario_state = start_resolution.global_narrative
-            self.state = GameState.ACTIVE_TURN
-            directive = self._next_turn_locked()
-            initial_state = self.current_scenario_state
-
-        try:
-            await self.transcript.start(title, initial_state)
-        except OSError as exc:
-            LOGGER.exception("Could not create game transcript")
+                if not self._job_current(epoch):
+                    return
+            await self.transcript.start(
+                self.scenario_title or "Untitled Session", resolution.global_narrative
+            )
             async with self.lock:
-                self.state = GameState.AWAITING_PLAYERS
-                self.active_player_id = None
-            await self._send_error(client_id, f"Could not create game transcript: {exc}")
-            return
-        start_payload = start_resolution.model_dump()
-        start_payload["round_title"] = title
-        start_payload["original_scenario"] = self.original_scenario
-        await self.sender.broadcast_global(ServerEvent(type="state_update", payload=start_payload))
-        await self.sender.broadcast_global(
-            ServerEvent(type="system_msg", payload={"msg": "The game has started."})
-        )
-        await self.sender.broadcast_global(
-            ServerEvent(type="round_start", payload={"round_number": 1})
-        )
-        if directive is not None:
-            await self.sender.broadcast_global(directive)
+                if not self._job_current(epoch):
+                    return
+                self.current_scenario_state = resolution.global_narrative
+                self.state = GameState.ACTIVE_TURN
+                directive = self._next_turn_locked()
+            payload = resolution.model_dump()
+            payload.update(
+                round_title=self.scenario_title, original_scenario=self.original_scenario
+            )
+            await self.sender.broadcast_global(ServerEvent(type="state_update", payload=payload))
+            await self.sender.broadcast_global(
+                ServerEvent(type="system_msg", payload={"msg": "The game has started."})
+            )
+            await self.sender.broadcast_global(
+                ServerEvent(type="round_start", payload={"round_number": 1})
+            )
+            if directive is not None:
+                await self.sender.broadcast_global(directive)
 
     async def _end_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         del data
         async with self.lock:
+            if not CURRENT_OWNER.get()():
+                return
             player = self.players.get(client_id)
             if player is None or not player.is_host:
-                error = "Only the host can end the game."
-            elif self.state not in {GameState.ACTIVE_TURN, GameState.AWAITING_LLM}:
-                error = "The game cannot be ended in the current state."
-            else:
-                error = None
-                self.state = GameState.ENDED
-                self.active_player_id = None
-        if error is not None:
-            await self._send_error(client_id, error)
-            return
-        try:
-            await self.transcript.finalize()
-        except OSError:
-            LOGGER.exception("Could not finalize game transcript")
-        await self.sender.broadcast_global(
-            ServerEvent(type="game_ended", payload={"msg": "The host ended the game."})
-        )
+                raise ValueError("Only the host can end the game.")
+            if self.state not in {GameState.ACTIVE_TURN, GameState.AWAITING_LLM}:
+                raise ValueError("The game cannot be ended in the current state.")
+        await self.shutdown(close_resolver=False)
 
     def _player_roster_event(self: "GameEngine") -> ServerEvent:
         return ServerEvent(
@@ -270,6 +265,8 @@ class LobbyMixin:
     def _snapshot_locked(self: "GameEngine", player: Player) -> dict[str, object]:
         return {
             "client_id": player.client_id,
+            "reconnect_token": player.reconnect_token,
+            "round_paused": self.round_paused,
             "name": player.name,
             "is_host": player.is_host,
             "state": self.state.name,
