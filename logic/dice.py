@@ -17,13 +17,13 @@ def describe_roll(value: int) -> str:
     if value < 35:
         return "failure or costly partial success"
     if value < 50:
-        return "success"
+        return "mediocre success"
     if value < 65:
-        return "qualified success"
+        return "adequate success"
     if value < 75:
         return "qualified success"
     if value < 90:
         return "resounding success"
     if value < 101:
-        return "perfect success"
+        return "perfect success, extra benefits"
     return "success"

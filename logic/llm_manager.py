@@ -157,7 +157,7 @@ class LLMContextManager:
             roll_context = (
                 "\n\nAuthoritative d100 results: " + rendered + ". Outcomes must honor "
                 "these results; less than 11 is a catastrophic failure and above 90 a "
-                "perfect success."
+                "perfect success with extra benefits."
             )
         if hidden_rolls:
             roll_context += (
