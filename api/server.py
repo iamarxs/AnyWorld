@@ -1,7 +1,8 @@
-"""FastAPI HTTP routes and WebSocket connection gateway."""
+"""FastAPI routes and an authenticated, socket-bound WebSocket gateway."""
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
@@ -11,130 +12,210 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
+from core.config import settings
 from core.schemas import ClientPayload, ServerEvent
 from logic.engine import GameEngine
-from logic.llm_manager import llm_manager
+from logic.llm_manager import LLMContextManager
 
 LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ConnectionManager:
-    """Own active sockets and provide resilient broadcast/unicast operations."""
+    """Pending sockets are never broadcast subscribers.
+
+    All dictionary operations are synchronous on the ASGI event loop. Promotion is
+    invoked inside the engine authentication lock, without performing network I/O.
+    """
 
     def __init__(self) -> None:
         self.active_connections: dict[str, WebSocket] = {}
-        self._send_locks: dict[str, asyncio.Lock] = {}
-        self._lock = asyncio.Lock()
+        self.pending: set[WebSocket] = set()
+        self._send_locks: dict[WebSocket, asyncio.Lock] = {}
 
-    async def connect(self, client_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
-        async with self._lock:
-            previous = self.active_connections.get(client_id)
-            self.active_connections[client_id] = websocket
-            self._send_locks.setdefault(client_id, asyncio.Lock())
-        if previous is not None and previous is not websocket:
-            try:
-                await previous.close(code=1000, reason="Session reconnected")
-            except RuntimeError:
-                LOGGER.debug("Previous socket for %s was already closed", client_id)
+    async def connect(self, client_id: str, websocket: WebSocket) -> bool:
+        del client_id
+        if len(self.pending) >= settings.server.max_pending_connections:
+            await websocket.close(code=1013, reason="Too many pending connections")
+            return False
+        self.pending.add(websocket)
+        self._send_locks[websocket] = asyncio.Lock()
+        try:
+            await websocket.accept()
+        except BaseException:
+            self.pending.discard(websocket)
+            self._send_locks.pop(websocket, None)
+            raise
+        return True
+
+    def promote(self, client_id: str, websocket: WebSocket) -> WebSocket | None:
+        if websocket not in self.pending:
+            raise ValueError("Connection is no longer pending authentication.")
+        previous = self.active_connections.get(client_id)
+        self.pending.remove(websocket)
+        self.active_connections[client_id] = websocket
+        return previous
+
+    def owns(self, client_id: str, websocket: WebSocket) -> bool:
+        return self.active_connections.get(client_id) is websocket
 
     async def disconnect(self, client_id: str, websocket: WebSocket) -> bool:
-        async with self._lock:
-            if self.active_connections.get(client_id) is not websocket:
-                return False
-            del self.active_connections[client_id]
-            self._send_locks.pop(client_id, None)
-            return True
+        self.pending.discard(websocket)
+        self._send_locks.pop(websocket, None)
+        if not self.owns(client_id, websocket):
+            return False
+        del self.active_connections[client_id]
+        return True
 
     async def broadcast_global(self, event: ServerEvent) -> None:
-        async with self._lock:
-            connections = list(self.active_connections.items())
-        await asyncio.gather(
-            *(self._send(client_id, websocket, event) for client_id, websocket in connections)
-        )
+        await self._broadcast(event)
 
     async def broadcast_except(self, client_id: str, event: ServerEvent) -> None:
-        async with self._lock:
-            connections = [
-                (item_id, socket)
-                for item_id, socket in self.active_connections.items()
-                if item_id != client_id
-            ]
-        await asyncio.gather(
-            *(self._send(item_id, socket, event) for item_id, socket in connections)
-        )
+        await self._broadcast(event, exclude=client_id)
+
+    async def _broadcast(self, event: ServerEvent, exclude: str | None = None) -> None:
+        message = event.model_dump_json()
+        sockets = [socket for item, socket in self.active_connections.items() if item != exclude]
+        await asyncio.gather(*(self._send_text(socket, message) for socket in sockets))
 
     async def send_personal(self, client_id: str, event: ServerEvent) -> None:
-        async with self._lock:
-            websocket = self.active_connections.get(client_id)
+        websocket = self.active_connections.get(client_id)
         if websocket is not None:
-            await self._send(client_id, websocket, event)
+            await self.send_socket(websocket, event)
 
-    async def _send(self, client_id: str, websocket: WebSocket, event: ServerEvent) -> None:
-        async with self._lock:
-            send_lock = self._send_locks.get(client_id)
-        if send_lock is None:
+    async def send_socket(self, websocket: WebSocket, event: ServerEvent) -> None:
+        await self._send_text(websocket, event.model_dump_json())
+
+    async def _send_text(self, websocket: WebSocket, message: str) -> None:
+        lock = self._send_locks.get(websocket)
+        if lock is None:
             return
         try:
-            async with send_lock:
-                await websocket.send_text(event.model_dump_json())
-        except (RuntimeError, OSError, WebSocketDisconnect):
-            LOGGER.warning("Could not send %s event to %s", event.type, client_id)
+            async with asyncio.timeout(5):
+                async with lock:
+                    await websocket.send_text(message)
+        except (TimeoutError, RuntimeError, OSError, WebSocketDisconnect):
+            await self.close_socket(websocket)
+
+    @staticmethod
+    async def close_socket(websocket: WebSocket, code: int = 1000) -> None:
+        try:
+            async with asyncio.timeout(2):
+                await websocket.close(code=code)
+        except (TimeoutError, RuntimeError, OSError, WebSocketDisconnect):
+            pass
+
+    async def close(self) -> None:
+        sockets = set(self.active_connections.values()) | self.pending
+        await asyncio.gather(*(self.close_socket(socket) for socket in sockets))
+        self.active_connections.clear()
+        self.pending.clear()
+        self._send_locks.clear()
 
 
-manager = ConnectionManager()
-game_engine = GameEngine(manager, llm_manager)
-app = FastAPI(title="Anyworld")
-app.mount(
-    "/static",
-    StaticFiles(directory=PROJECT_ROOT / "static"),
-    name="static",
-)
-templates = Jinja2Templates(directory=PROJECT_ROOT / "templates")
-
-
-@app.get("/", response_class=HTMLResponse)
-async def get_index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request=request, name="index.html")
-
-
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
-    try:
-        UUID(client_id)
-    except (ValueError, AttributeError):
-        await websocket.close(code=1008, reason="client_id must be a UUID")
-        return
-    await manager.connect(client_id, websocket)
-    try:
-        while True:
+def create_app(resolver_factory=LLMContextManager) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        settings.server.validate_passwords()
+        manager = ConnectionManager()
+        engine = GameEngine(manager, resolver_factory())
+        application.state.manager = manager
+        application.state.engine = engine
+        try:
+            yield
+        finally:
             try:
-                raw_payload = await websocket.receive_json()
-                payload = ClientPayload.model_validate(raw_payload)
-            except ValidationError as exc:
-                await manager.send_personal(
+                await engine.shutdown()
+            finally:
+                await manager.close()
+
+    application = FastAPI(title="Anyworld", lifespan=lifespan)
+    application.mount("/static", StaticFiles(directory=PROJECT_ROOT / "static"), name="static")
+    templates = Jinja2Templates(directory=PROJECT_ROOT / "templates")
+
+    @application.get("/", response_class=HTMLResponse)
+    async def get_index(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(request=request, name="index.html")
+
+    @application.websocket("/ws/{client_id}")
+    async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
+        try:
+            if str(UUID(client_id)) != client_id:
+                raise ValueError("Noncanonical UUID")
+        except (ValueError, AttributeError):
+            await websocket.close(code=1008, reason="client_id must be a canonical UUID")
+            return
+        manager = websocket.app.state.manager
+        engine = websocket.app.state.engine
+        if not await manager.connect(client_id, websocket):
+            return
+        deadline = asyncio.get_running_loop().time() + settings.server.auth_timeout_seconds
+        attempts = 0
+        authenticated = False
+        try:
+            while True:
+                try:
+                    if not authenticated:
+                        attempts += 1
+                        async with asyncio.timeout_at(deadline):
+                            raw_payload = await websocket.receive_json()
+                    else:
+                        raw_payload = await websocket.receive_json()
+                    payload = ClientPayload.model_validate(raw_payload)
+                    if not authenticated:
+                        if payload.event_type != "auth":
+                            raise ValueError("Authenticate before sending game messages.")
+                        previous = []
+                        await engine._authenticate(
+                            client_id,
+                            payload.data,
+                            activate=lambda: previous.append(manager.promote(client_id, websocket)),
+                        )
+                        authenticated = True
+                        if previous and previous[0] is not None:
+                            await manager.close_socket(previous[0])
+                    elif not manager.owns(client_id, websocket):
+                        break
+                    elif payload.event_type == "auth":
+                        raise ValueError("This socket is already authenticated.")
+                    else:
+                        await engine.process_payload(
+                            client_id,
+                            payload,
+                            authorize=lambda: manager.owns(client_id, websocket),
+                        )
+                except (ValidationError, ValueError) as exc:
+                    message = (
+                        "Invalid message schema." if isinstance(exc, ValidationError) else str(exc)
+                    )
+                    await manager.send_socket(
+                        websocket, ServerEvent(type="error", payload={"msg": message})
+                    )
+                    if not authenticated and attempts >= settings.server.max_auth_attempts:
+                        await manager.close_socket(websocket, code=1008)
+                        break
+        except TimeoutError:
+            await manager.close_socket(websocket, code=1008)
+        except (WebSocketDisconnect, RuntimeError):
+            LOGGER.info("WebSocket disconnected")
+        finally:
+            # Hold the engine state lock across removal/marking to avoid a new
+            # authenticated replacement being marked disconnected by an older socket.
+            async with engine.lock:
+                removed = await manager.disconnect(client_id, websocket)
+                if removed:
+                    player = engine.players.get(client_id)
+                    version = player.connection_version if player is not None else None
+                else:
+                    version = None
+            if removed:
+                await engine.handle_disconnect(
                     client_id,
-                    ServerEvent(
-                        type="error",
-                        payload={
-                            "msg": "Invalid message schema.",
-                            "details": exc.errors(include_url=False, include_context=False),
-                        },
-                    ),
+                    expected_version=version,
+                    still_disconnected=lambda: client_id not in manager.active_connections,
                 )
-                continue
-            except ValueError:
-                await manager.send_personal(
-                    client_id,
-                    ServerEvent(type="error", payload={"msg": "Message must be valid JSON."}),
-                )
-                continue
-            await game_engine.process_payload(client_id, payload)
-    except WebSocketDisconnect:
-        LOGGER.info("WebSocket disconnected: %s", client_id)
-    except RuntimeError:
-        LOGGER.exception("WebSocket runtime failure for %s", client_id)
-    finally:
-        if await manager.disconnect(client_id, websocket):
-            await game_engine.handle_disconnect(client_id)
+
+    return application
+
+
+app = create_app()
