@@ -1,0 +1,154 @@
+"""Real ASGI WebSocket authorization tests with no model/network calls."""
+
+import asyncio
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from api.server import ConnectionManager, create_app
+from core.config import settings
+from core.schemas import ServerEvent
+from test_engine import FakeResolver, password_digest
+
+
+def receive_until(socket, kind, predicate=lambda event: True):
+    for _ in range(30):
+        event = socket.receive_json()
+        if event["type"] == kind and predicate(event):
+            return event
+    raise AssertionError(f"Did not receive {kind}")
+
+
+def authenticate(socket, client_id, name="Host", password=None, reconnect_token=None):
+    socket.send_json(
+        {
+            "event_type": "auth",
+            "data": {
+                "name": name,
+                "password_digest": password_digest(
+                    password or settings.server.host_password, client_id
+                ),
+                "reconnect_token": reconnect_token,
+            },
+        }
+    )
+
+
+def test_unauthenticated_socket_cannot_receive_broadcasts_or_use_existing_identity():
+    app = create_app(FakeResolver)
+    host_id, pending_id = str(uuid4()), str(uuid4())
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/{host_id}") as host:
+            authenticate(host, host_id)
+            receive_until(host, "auth_ok")
+            with client.websocket_connect(f"/ws/{pending_id}") as pending:
+                host.send_json({"event_type": "chat", "data": {"message": "PRIVATE PARTY CHAT"}})
+                receive_until(host, "chat_echo")
+                pending.send_json({"event_type": "chat", "data": {"message": "Probe"}})
+                # A broadcast queued before the error would be a data leak.
+                assert pending.receive_json() == {
+                    "type": "error",
+                    "payload": {"msg": "Authenticate before sending game messages."},
+                }
+            with client.websocket_connect(f"/ws/{host_id}") as impostor:
+                authenticate(impostor, host_id, password="wrong")
+                assert impostor.receive_json()["type"] == "error"
+                impostor.send_json({"event_type": "end_game", "data": {}})
+                assert impostor.receive_json()["type"] == "error"
+                host.send_json(
+                    {"event_type": "chat", "data": {"message": "Host still owns socket"}}
+                )
+                assert (
+                    receive_until(host, "chat_echo")["payload"]["chat"] == "Host still owns socket"
+                )
+                assert app.state.engine.players[host_id].is_connected
+
+
+def test_password_alone_cannot_reclaim_an_existing_client_id():
+    app = create_app(FakeResolver)
+    host_id = str(uuid4())
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/{host_id}") as host:
+            authenticate(host, host_id)
+            token = receive_until(host, "auth_ok")["payload"]["reconnect_token"]
+            with client.websocket_connect(f"/ws/{host_id}") as replacement:
+                authenticate(replacement, host_id)
+                error = replacement.receive_json()
+                assert "reconnect token" in error["payload"]["msg"]
+                authenticate(replacement, host_id, reconnect_token=token)
+                receive_until(replacement, "auth_ok")
+                replacement.send_json({"event_type": "chat", "data": {"message": "Reconnected"}})
+                receive_until(replacement, "chat_echo")
+                assert app.state.engine.players[host_id].is_connected
+                assert not app.state.engine.players[host_id].return_pending
+
+
+def test_invalid_auth_attempt_limit_includes_malformed_json():
+    settings.server.max_auth_attempts = 2
+    with TestClient(create_app(FakeResolver)) as client:
+        with client.websocket_connect(f"/ws/{uuid4()}") as socket:
+            socket.send_text("{")
+            assert socket.receive_json()["type"] == "error"
+            socket.send_text("{")
+            assert socket.receive_json()["type"] == "error"
+            with pytest.raises(WebSocketDisconnect) as exc:
+                socket.receive_json()
+            assert exc.value.code == 1008
+
+
+def test_pending_connection_cap_and_deadline():
+    settings.server.max_pending_connections = 1
+    settings.server.auth_timeout_seconds = 0.1
+    app = create_app(FakeResolver)
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/{uuid4()}") as idle:
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect(f"/ws/{uuid4()}"):
+                    pass
+            with pytest.raises(WebSocketDisconnect) as exc:
+                idle.receive_json()
+            assert exc.value.code == 1008
+
+
+@pytest.mark.parametrize("host,player", [(None, "player"), ("host", None), ("same", "same")])
+def test_direct_asgi_startup_rejects_missing_or_equal_passwords(host, player):
+    settings.server.host_password = host
+    settings.server.player_password = player
+    with pytest.raises(ValueError):
+        with TestClient(create_app(FakeResolver)):
+            pass
+
+
+def test_manager_pending_promotion_and_old_disconnect_do_not_affect_replacement():
+    class Socket:
+        def __init__(self):
+            self.messages = []
+            self.closed = False
+
+        async def accept(self):
+            pass
+
+        async def send_text(self, text):
+            self.messages.append(text)
+
+        async def close(self, code=1000):
+            self.closed = True
+
+    async def run():
+        manager = ConnectionManager()
+        old, new = Socket(), Socket()
+        await manager.connect("one", old)
+        manager.promote("one", old)
+        await manager.connect("one", new)
+        await manager.broadcast_global(ServerEvent(type="chat_echo", payload={"chat": "hello"}))
+        assert len(old.messages) == 1 and new.messages == [] and not old.closed
+        assert manager.promote("one", new) is old
+        assert not manager.owns("one", old)
+        assert not await manager.disconnect("one", old)
+        assert manager.owns("one", new)
+        await manager.close()
+        assert new.closed and not manager.pending
+
+    asyncio.run(run())

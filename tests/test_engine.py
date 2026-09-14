@@ -32,7 +32,7 @@ class FakeResolver:
         self.scenario = ""
         self.rounds = 0
 
-    def set_genesis(self, scenario: str) -> None:
+    def set_genesis(self, scenario: str, guidance: str = "") -> None:
         self.scenario = scenario
 
     async def generate_initial_state(self) -> RoundResolution:
@@ -84,6 +84,7 @@ async def build_started_game(tmp_path: Path) -> tuple[GameEngine, FakeSender, Fa
     await engine.process_payload(
         "host", payload("scenario_init", scenario="A gate blocks the road.")
     )
+    await engine.wait_for_inference()
     await engine.process_payload(
         "player",
         payload(
@@ -93,6 +94,7 @@ async def build_started_game(tmp_path: Path) -> tuple[GameEngine, FakeSender, Fa
         ),
     )
     await engine.process_payload("host", payload("start_game"))
+    await engine.wait_for_inference()
     return engine, sender, resolver
 
 
@@ -108,6 +110,7 @@ def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
         await engine.process_payload("host", payload("action", action="Opens the gate"))
         assert engine.active_player_id == "player"
         await engine.process_payload("player", payload("action", action="Keeps watch"))
+        await engine.wait_for_inference()
 
         assert resolver.rounds == 1
         assert engine.round_counter == 1
@@ -145,6 +148,7 @@ def test_scenario_title_is_generated_before_game_start(tmp_path: Path) -> None:
         await engine.process_payload(
             "host", payload("scenario_init", scenario="A gate blocks the road.")
         )
+        await engine.wait_for_inference()
 
         ready = sender.events_of_type("scenario_ready")[-1]
         assert ready.payload["title"] == "The Test Quest"
@@ -152,9 +156,10 @@ def test_scenario_title_is_generated_before_game_start(tmp_path: Path) -> None:
         assert engine.current_scenario_state == "Two adventurers stand at a gate."
 
         await engine.process_payload("host", payload("start_game"))
+        await engine.wait_for_inference()
         assert engine.scenario_title == "The Test Quest"
         start_update = sender.events_of_type("state_update")[-1]
-        assert start_update.payload["round_title"] is None
+        assert start_update.payload["round_title"] == "The Test Quest"
 
     asyncio.run(run())
 
@@ -166,14 +171,13 @@ def test_active_disconnect_injects_idle_and_advances(tmp_path: Path) -> None:
         assert engine.active_player_id == "player"
 
         await engine.handle_disconnect("player")
+        await engine.wait_for_inference()
 
         assert resolver.rounds == 1
         assert engine.active_player_id == "host"
         state_event = sender.events_of_type("state_update")[-1]
         player_result = state_event.payload["player_resolutions"]["Player"]
-        assert player_result.startswith(
-            "Resolved: [SYSTEM: Explain this player's in-world departure"
-        )
+        assert "Resolved: [SYSTEM: Explain this player's in-world departure" in player_result
         assert player_result.endswith(IDLE_ACTION)
         assert sender.events_of_type("system_msg")[-1].payload["msg"] == ("Player disconnected.")
 

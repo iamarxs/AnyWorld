@@ -24,7 +24,6 @@ def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:
         await transcript.start("A <Quest>", "An & opening")
         await transcript.append_round(
             1,
-            "Before",
             {"Alice": "Uses <fire>"},
             RoundResolution(
                 global_narrative="After & beyond",

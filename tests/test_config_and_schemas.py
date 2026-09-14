@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from core.config import ConfigLoadError, Settings
 from core.schemas import ClientPayload, RoundResolution
-from logic.llm_manager import LLMContextManager
+from logic.llm_manager import LLMContextManager, LLMResolutionError
 
 
 def test_settings_loads_typed_yaml(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_websocket_and_resolution_schemas_are_strict() -> None:
         ClientPayload.model_validate({"event_type": "action", "data": {}, "unexpected": True})
 
 
-def test_context_history_evicts_oldest_round_pairs() -> None:
+def test_context_overflow_preserves_history_without_fifo_loss() -> None:
     manager = LLMContextManager()
     manager.context_window_size = 128_000
     manager.set_genesis("A short beginning")
@@ -79,10 +79,7 @@ def test_context_history_evicts_oldest_round_pairs() -> None:
         {"role": "assistant", "content": large_message},
     ]
 
-    messages = manager._bounded_messages({"role": "user", "content": "Act"})
-
-    input_limit = 128_000 - 2_048
-    assert manager._context_size(messages) <= input_limit
-    assert len(manager.history) == 2
-    assert messages[0]["role"] == "system"
-    assert messages[1]["content"].startswith("Initial Scenario:")
+    original = list(manager.history)
+    with pytest.raises(LLMResolutionError, match="memory preserved"):
+        manager._bounded_messages({"role": "user", "content": "Act"})
+    assert manager.history == original
