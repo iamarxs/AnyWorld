@@ -63,3 +63,10 @@ class RoundResolution(StrictModel):
     round_title: str | None = None
     global_narrative: str
     player_resolutions: dict[str, str]
+
+
+class SummaryAudit(StrictModel):
+    """Private check of a proposed memory checkpoint against its source context."""
+
+    preserved: bool
+    corrections: list[str]
