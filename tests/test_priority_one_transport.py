@@ -167,3 +167,52 @@ def test_manager_pending_promotion_and_old_disconnect_do_not_affect_replacement(
         assert new.closed and not manager.pending
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("rejoin_host", [False, True])
+def test_active_game_reconnect_restores_original_player_with_private_proof(rejoin_host):
+    """Reopened tabs must reuse the saved ID/token; shared credentials alone cannot take over."""
+    app = create_app(FakeResolver)
+    host_id, player_id = str(uuid4()), str(uuid4())
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/{host_id}") as host:
+            authenticate(host, host_id)
+            host_token = receive_until(host, "auth_ok")["payload"]["reconnect_token"]
+            host.send_json({"event_type": "scenario_init", "data": {"scenario": "A cabin."}})
+            receive_until(host, "scenario_ready")
+            with client.websocket_connect(f"/ws/{player_id}") as player:
+                authenticate(player, player_id, "Arxs", settings.server.player_password)
+                player_token = receive_until(player, "auth_ok")["payload"]["reconnect_token"]
+                host.send_json({"event_type": "start_game", "data": {}})
+                receive_until(player, "turn_directive")
+                if rejoin_host:
+                    original, observer = host, player
+                    identity, name, token = host_id, "Host", host_token
+                    password = settings.server.host_password
+                else:
+                    original, observer = player, host
+                    identity, name, token = player_id, "Arxs", player_token
+                    password = settings.server.player_password
+                original.close()
+                receive_until(
+                    observer,
+                    "system_msg",
+                    lambda event: (event["payload"]["msg"] == f"{name} disconnected."),
+                )
+                newcomer_id = str(uuid4())
+                with client.websocket_connect(f"/ws/{newcomer_id}") as newcomer:
+                    authenticate(newcomer, newcomer_id, name, password)
+                    assert "not accepting new players" in newcomer.receive_json()["payload"]["msg"]
+                with client.websocket_connect(f"/ws/{identity}") as recovered:
+                    authenticate(recovered, identity, name, password, "incorrect-token")
+                    assert "reconnect token" in recovered.receive_json()["payload"]["msg"]
+                    authenticate(recovered, identity, name, password, token)
+                    snapshot = receive_until(recovered, "auth_ok")["payload"]
+                    assert snapshot["client_id"] == identity
+                    assert snapshot["name"] == name
+                    assert snapshot["is_host"] is rejoin_host
+                    assert snapshot["round_number"] == 1
+                    assert len(app.state.engine.players) == 2
+                    assert app.state.engine.players[identity].is_connected
+                    recovered.send_json({"event_type": "chat", "data": {"message": "I'm back"}})
+                    assert receive_until(recovered, "chat_echo")["payload"]["name"] == name

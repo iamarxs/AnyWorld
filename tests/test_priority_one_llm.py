@@ -426,3 +426,28 @@ def test_cancelling_compaction_keeps_original_memory_and_history():
         assert manager.memory is previous_memory and manager.history is previous_history
 
     asyncio.run(run())
+
+
+def test_connection_failure_has_safe_category_and_retains_context():
+    """Transport failures remain retryable without exposing provider details."""
+    from openai import APIConnectionError
+    from logic.llm_manager import LLMBackendUnavailableError
+
+    async def run():
+        client = FakeClient(
+            APIConnectionError(
+                message="PRIVATE provider details",
+                request=httpx.Request("POST", "http://test.invalid"),
+            )
+        )
+        manager = LLMContextManager(client)
+        manager.history = [{"role": "user", "content": "Established facts"}]
+        original = list(manager.history)
+        with pytest.raises(LLMBackendUnavailableError, match="Could not connect") as error:
+            await manager.plan_dice({"Alice": "Wait"})
+        assert "PRIVATE" not in str(error.value)
+        assert manager.history == original
+        assert len(client.calls) == settings.llm.max_retries + 1
+        assert manager.last_request["error"] == "APIConnectionError"
+
+    asyncio.run(run())

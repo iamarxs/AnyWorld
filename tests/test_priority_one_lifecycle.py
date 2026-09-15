@@ -350,3 +350,32 @@ def test_cancelled_transcript_write_cannot_be_overtaken_by_finalization(tmp_path
             )
 
     asyncio.run(run())
+
+
+def test_disconnect_triggered_round_reports_backend_outage_and_retries(tmp_path, monkeypatch):
+    """Idle injection may trigger work, but an outage must preserve the round and explain why."""
+    from logic.llm_manager import LLMBackendUnavailableError
+
+    async def run():
+        engine, sender, resolver = await setup(tmp_path)
+        original_plan = resolver.plan_dice
+
+        async def unavailable(actions, current_state=""):
+            raise LLMBackendUnavailableError("PRIVATE provider details")
+
+        monkeypatch.setattr(resolver, "plan_dice", unavailable)
+        await engine.process_payload("host", payload("action", action="Look around"))
+        await engine.handle_disconnect("player")
+        await engine.wait_for_inference()
+        assert engine.round_paused
+        assert len(engine.round_buffer) == 2
+        message = sender.events_of_type("error")[-1].payload["msg"]
+        assert "Could not connect to the LLM backend" in message
+        assert "PRIVATE" not in message
+        monkeypatch.setattr(resolver, "plan_dice", original_plan)
+        await engine.process_payload("host", payload("retry_round"))
+        await engine.wait_for_inference()
+        assert engine.round_counter == 1
+        assert not engine.round_paused
+
+    asyncio.run(run())

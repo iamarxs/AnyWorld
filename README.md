@@ -118,8 +118,18 @@ in generated prose are not automatically corrected.
 
 Pending sockets receive no game broadcasts. Optional `server` admission settings are
 `max_pending_connections: 32`, `auth_timeout_seconds: 30.0`, and `max_auth_attempts: 3`.
-Reconnects require a per-player token stored in the same browser tab's sessionStorage, in addition
-to the password. Keep that browser session to rejoin your character; clearing it loses the token.
+Reconnects require a private per-player token as well as the password. A disconnected tab
+reconnects automatically using its session credentials. If you close the tab or browser, reopen
+the **same address** in the **same browser profile** and enter the same player name and password.
+After successful login, the browser saves that player's ID and reconnect token in localStorage;
+a new tab can restore them after you enter your credentials. Passwords and password digests
+are not saved in localStorage. Rejoining replaces the previous socket for that player.
+
+Clearing site storage, using a different browser/profile, or changing the scheme, hostname/IP,
+or port loses access to that saved identity. The shared password and name alone cannot reclaim
+an existing player. Private browsing or blocked storage may prevent recovery after closing the
+tab. Sessions created before this recovery feature need one successful login/reconnect in the
+original tab with the updated client before their identity is saved for new-tab recovery.
 Reconnect snapshots restore current state and submitted actions, not the entire past log. The UI
 keeps at most 500 game-log elements (including the banner) and 300 chat entries. The banner is
 the first item in the game pane and scrolls with its contents.
@@ -240,6 +250,8 @@ assisted in the production of this app.
 black --check app.py api core logic tests
 flake8 app.py api core logic tests
 pytest
+# Client reconnect and password-hashing regressions (requires Node.js):
+node --test tests/client_reconnect.test.cjs
 ```
 
 Tests use isolated settings and fake model clients; they do not require a running LLM. They

@@ -1,6 +1,32 @@
 "use strict";
 
-const storedId = sessionStorage.getItem("artificialDungeonClientId");
+// Storage can be unavailable in privacy modes. Keep the active tab usable in memory.
+function readStored(storageName, key) {
+    try {
+        return window[storageName].getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+function writeStored(storageName, key, value) {
+    try {
+        window[storageName].setItem(key, value);
+    } catch {
+        // Automatic socket reconnects can still use this tab's in-memory credentials.
+    }
+}
+
+function readStoredObject(storageName, key) {
+    try {
+        const value = JSON.parse(readStored(storageName, key));
+        return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+const storedId = readStored("sessionStorage", "artificialDungeonClientId");
 
 // crypto.randomUUID() is unavailable on non-secure HTTP origins except localhost.
 // Use a standards-compatible fallback so remote HTTP clients do not fail before
@@ -25,8 +51,28 @@ function createClientId() {
     });
 }
 
-const clientId = storedId || createClientId();
-sessionStorage.setItem("artificialDungeonClientId", clientId);
+let clientId = storedId || createClientId();
+let savedAuth = readStoredObject("sessionStorage", "artificialDungeonAuth");
+writeStored("sessionStorage", "artificialDungeonClientId", clientId);
+
+function identityKey(name) {
+    return `artificialDungeonIdentity:${name.trim().toLowerCase()}`;
+}
+
+function rememberAuth(auth) {
+    savedAuth = auth;
+    writeStored("sessionStorage", "artificialDungeonAuth", JSON.stringify(auth));
+}
+
+function rememberedIdentity(name) {
+    const identity = readStoredObject("localStorage", identityKey(name));
+    if (typeof identity?.clientId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(identity.clientId) ||
+        typeof identity.reconnectToken !== "string" || !identity.reconnectToken) {
+        return null;
+    }
+    return identity;
+}
 
 const socketScheme = window.location.protocol === "https:" ? "wss" : "ws";
 // WAN routes and reverse proxies can drop an initial handshake. Retry the socket
@@ -226,6 +272,7 @@ function appendState(text, roundNumber = null) {
 
 function showError(message) {
     if (!authenticated) {
+        elements.loginModal.hidden = false;
         elements.loginError.textContent = message;
     } else {
         appendText(
@@ -293,10 +340,16 @@ function handleMessage(message) {
         return;
     }
     if (type === "auth_ok") {
-        const savedAuth = JSON.parse(sessionStorage.getItem("artificialDungeonAuth") || "{}");
-        savedAuth.reconnect_token = payload.reconnect_token;
-        sessionStorage.setItem("artificialDungeonAuth", JSON.stringify(savedAuth));
+        rememberAuth({ ...savedAuth, name: payload.name, reconnect_token: payload.reconnect_token });
+        // Persist only the identity proof, never the password or password digest.
+        // A reopened tab still asks for credentials before it can reclaim this player.
+        writeStored("localStorage", identityKey(payload.name), JSON.stringify({
+            clientId,
+            reconnectToken: payload.reconnect_token,
+        }));
         authenticated = true;
+        elements.chatInput.disabled = false;
+        elements.connectionStatus.textContent = "Connected";
         elements.loginModal.hidden = true;
         elements.grid.hidden = false;
         elements.loginError.textContent = "";
@@ -429,21 +482,28 @@ function handleMessage(message) {
 
 function connectSocket() {
     clearTimeout(reconnectTimer);
-    ws = new WebSocket(`${socketScheme}://${window.location.host}/ws/${clientId}`);
+    clearTimeout(connectionTimer);
+    const previous = ws;
+    const socket = new WebSocket(`${socketScheme}://${window.location.host}/ws/${clientId}`);
+    ws = socket;
+    authenticated = false;
+    elements.actionInput.disabled = true;
+    elements.chatInput.disabled = true;
+    if (previous && previous.readyState < WebSocket.CLOSING) previous.close();
     connectionTimer = window.setTimeout(() => {
-        if (ws.readyState === WebSocket.CONNECTING) ws.close();
+        if (ws === socket && socket.readyState === WebSocket.CONNECTING) socket.close();
     }, 10000);
-    ws.addEventListener("open", () => {
+    socket.addEventListener("open", () => {
+        if (ws !== socket) return;
         clearTimeout(connectionTimer);
         reconnectAttempts = 0;
-        elements.connectionStatus.textContent = "Connected";
-        elements.chatInput.disabled = false;
-        const savedAuth = sessionStorage.getItem("artificialDungeonAuth");
-        if (savedAuth && !authenticated) {
-            ws.send(JSON.stringify({ event_type: "auth", data: JSON.parse(savedAuth) }));
+        elements.connectionStatus.textContent = savedAuth ? "Rejoining..." : "Connected";
+        if (savedAuth) {
+            socket.send(JSON.stringify({ event_type: "auth", data: savedAuth }));
         }
     });
-    ws.addEventListener("message", (event) => {
+    socket.addEventListener("message", (event) => {
+        if (ws !== socket) return;
         try {
             handleMessage(JSON.parse(event.data));
         } catch (error) {
@@ -451,7 +511,9 @@ function connectSocket() {
             showError("Received an invalid server message.");
         }
     });
-    ws.addEventListener("close", () => {
+    socket.addEventListener("close", () => {
+        if (ws !== socket) return;
+        clearTimeout(connectionTimer);
         authenticated = false;
         elements.connectionStatus.textContent = "Reconnecting...";
         elements.actionInput.disabled = true;
@@ -460,7 +522,8 @@ function connectSocket() {
         reconnectAttempts += 1;
         reconnectTimer = window.setTimeout(connectSocket, delay);
     });
-    ws.addEventListener("error", () => {
+    socket.addEventListener("error", () => {
+        if (ws !== socket) return;
         elements.connectionStatus.textContent = "Connection error";
     });
 }
@@ -501,22 +564,22 @@ function fallbackSha256(value) {
             const e = hash[4];
             const temp1 = hash[7] + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
                 + ((e & hash[5]) ^ (~e & hash[6])) + constants[index]
-                + (schedule[index] = index < 16 ? schedule[index] :
+                + (schedule[index] = index < 16 ? (schedule[index] || 0) :
                     (schedule[index - 16] + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
                     + schedule[index - 7] + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
             const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
                 + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
             hash.pop();
             hash.unshift((temp1 + temp2) | 0);
-            hash[4] = (hash[5] + temp1) | 0;
+            hash[4] = (hash[4] + temp1) | 0;
         }
         hash.forEach((valuePart, index) => { hash[index] = (valuePart + oldHash[index]) | 0; });
     }
     return hash.map((word) => (word >>> 0).toString(16).padStart(8, "0")).join("");
 }
 
-async function passwordDigest(password) {
-    const value = password + clientId;
+async function passwordDigest(password, identity = clientId) {
+    const value = password + identity;
     // Some mobile browsers expose crypto.subtle but reject it on an insecure HTTP
     // origin. Fall back if the digest operation itself is unavailable or rejected.
     if (window.crypto?.subtle && window.TextEncoder) {
@@ -537,19 +600,24 @@ elements.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     elements.loginError.textContent = "";
     try {
+        const name = elements.name.value.trim();
+        const identity = rememberedIdentity(name);
+        const targetId = identity?.clientId || clientId;
         const auth = {
-            name: elements.name.value.trim(),
-            password_digest: await passwordDigest(elements.password.value),
-            reconnect_token: JSON.parse(
-                sessionStorage.getItem("artificialDungeonAuth") || "{}",
-            ).reconnect_token,
+            name,
+            password_digest: await passwordDigest(elements.password.value, targetId),
+            reconnect_token: identity?.reconnectToken || (
+                savedAuth?.name?.toLowerCase() === name.toLowerCase()
+                    ? savedAuth.reconnect_token : undefined
+            ),
         };
-        if (send("auth", auth)) {
-            sessionStorage.setItem("artificialDungeonAuth", JSON.stringify({
-                name: auth.name,
-                password_digest: auth.password_digest,
-                reconnect_token: auth.reconnect_token,
-            }));
+        rememberAuth(auth);
+        if (targetId !== clientId || ws.readyState !== WebSocket.OPEN) {
+            clientId = targetId;
+            writeStored("sessionStorage", "artificialDungeonClientId", clientId);
+            connectSocket();
+        } else {
+            send("auth", auth);
         }
     } catch (error) {
         showError(error.message);

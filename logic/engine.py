@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from core.config import settings
 from core.schemas import ServerEvent
 from logic.dice import roll_d100
-from logic.llm_manager import LLMResolutionError
+from logic.llm_manager import LLMBackendUnavailableError, LLMResolutionError
 from logic.lobby import CURRENT_OWNER, LobbyMixin
 from logic.models import EventSender, GameState, Player, ResolutionManager
 from logic.presentation import name_resolution
@@ -89,6 +89,12 @@ class GameEngine(LobbyMixin):
             # Boundary for an owned task: consume failures so the session never
             # remains spinning forever. Do not expose provider bodies/private guidance.
             LOGGER.warning("Inference job failed: %s", type(exc).__name__)
+            connection_hint = (
+                "Could not connect to the LLM backend. Check that the model server is running "
+                "and its configured endpoint is reachable before retrying. "
+                if isinstance(exc, LLMBackendUnavailableError)
+                else ""
+            )
             async with self.effects_lock:
                 async with self.lock:
                     if not self._job_current(epoch):
@@ -100,10 +106,13 @@ class GameEngine(LobbyMixin):
                         type="error",
                         payload={
                             "msg": (
-                                "Round paused; actions and dice are retained. "
-                                "The host can retry or end."
-                                if self.round_paused
-                                else "Could not prepare the game. Please try again."
+                                connection_hint
+                                + (
+                                    "Round paused; actions and dice are retained. "
+                                    "The host can retry or end."
+                                    if self.round_paused
+                                    else "Could not prepare the game. Please try again."
+                                )
                             ),
                             "round_paused": self.round_paused,
                             "state": self.state.name,
