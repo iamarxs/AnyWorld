@@ -6,7 +6,10 @@ __pycache__/
 .pytest_cache/
 .coverage
 .logged_games/
+!.logged_games/Played_game_logs_appear_here
 .pi/
-certs/
+certs/cert.pem
+certs/key.pem
 pytest-output.txt
-IMPLEMENTATION_STATUS.md
+
+
