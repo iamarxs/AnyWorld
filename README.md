@@ -82,12 +82,12 @@ max_retries: 1
 
 Additional optional `llm` settings:
 
-| Setting | Default | Behavior |
-| --- | --- | --- |
-| `enable_thinking` | `null` | Sends `chat_template_kwargs.enable_thinking` only to compatible backends when set. Support depends on the backend/template; the current `config.yaml` sets it to `false`. |
-| `planner_system_prompt` | `null` | Replaces the system prompt for dice planning only. Scenario, private guidance, memory, and recent history are still supplied. |
-| `compaction_target_fraction` | `0.75` | After compaction starts, aims to leave the upcoming request within this fraction of the context window. Allowed range: `0.5`–`1.0`. |
-| `history_round_limit` | `null` | Optionally requests earlier memory checkpoints after this many stored request/response pairs, including setup calls. Allowed range: `2`–`100`; this is not a hard history cap. |
+| Setting                      | Default | Behavior                                                                                                                                                                       |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enable_thinking`            | `null`  | Sends `chat_template_kwargs.enable_thinking` only to compatible backends when set. Support depends on the backend/template; the current `config.yaml` sets it to `false`.      |
+| `planner_system_prompt`      | `null`  | Replaces the system prompt for dice planning only. Scenario, private guidance, memory, and recent history are still supplied.                                                  |
+| `compaction_target_fraction` | `0.75`  | After compaction starts, aims to leave the upcoming request within this fraction of the context window. Allowed range: `0.5`–`1.0`.                                            |
+| `history_round_limit`        | `null`  | Optionally requests earlier memory checkpoints after this many stored request/response pairs, including setup calls. Allowed range: `2`–`100`; this is not a hard history cap. |
 
 Choose caps that leave sufficient input capacity within the effective backend context, especially
 for large parties. Before a request exceeds its budget, older rounds are merged into separate
@@ -124,10 +124,28 @@ Reconnect snapshots restore current state and submitted actions, not the entire 
 keeps at most 500 game-log elements (including the banner) and 300 chat entries. The banner is
 the first item in the game pane and scrolls with its contents.
 
-## Install (Windows Git Bash)
+## Install (Linux and Windows)
 
-Python 3.11 or newer is required. Run these commands from the repository root; use an
-installed Python version in place of `-3.11` if needed.
+Clone the repository and change into its directory:
+
+```bash
+git clone git@github.com:iamarxs/AnyWorld.git
+cd AnyWorld
+```
+
+Python 3.11 or newer is required. Run the remaining commands from the repository root. On
+Linux, use `python3` and `venv/bin/activate`; on Windows Git Bash, use `py -3.11` and
+`venv/Scripts/activate` (or replace `-3.11` with your installed Python version).
+
+Linux:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install -e .
+```
+
+Windows Git Bash:
 
 ```bash
 py -3.11 -m venv venv
