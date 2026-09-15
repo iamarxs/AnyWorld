@@ -9,9 +9,10 @@ from typing import Any
 from functools import lru_cache
 from collections import OrderedDict
 from hashlib import sha256
+from html import unescape
 
 import httpx
-from openai import AsyncOpenAI, OpenAIError
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, OpenAIError
 from pydantic import BaseModel, Field, ValidationError, create_model
 import tiktoken
 
@@ -26,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 class LLMResolutionError(RuntimeError):
     """Raised when the LLM cannot produce valid structured output."""
+
+
+class LLMBackendUnavailableError(LLMResolutionError):
+    """The provider connection failed before a usable model response arrived."""
 
 
 @lru_cache(maxsize=32)
@@ -463,6 +468,19 @@ class LLMContextManager:
         title_required: bool = False,
     ) -> Any:
         """Run a single LLM request, optionally compacting history and remembering the result."""
+        if issubclass(schema, RoundResolution):
+            prompt = {
+                **prompt,
+                "content": prompt["content"]
+                + (
+                    "\nWrite all narrative fields as plain prose, without HTML/XML tags, "
+                    "escaped tags, code fences, or technical status/error messages. "
+                    "Disconnect/idle/return annotations are out-of-world bookkeeping: "
+                    "describe only a plausible in-world absence, inaction, or return. "
+                    "Never echo SYSTEM annotations, I/O errors, network state, or the "
+                    "player's real-world connection status into the story."
+                ),
+            }
         await self.discover_context_window()
         if include_history:
             await self._compact_if_needed(prompt, schema, kind)
@@ -542,6 +560,27 @@ class LLMContextManager:
             ):
                 raise LLMResolutionError("Summary contains empty or unknown player state.")
         if isinstance(result, RoundResolution):
+            for text in (
+                result.round_title or "",
+                result.global_narrative,
+                *result.player_resolutions.values(),
+            ):
+                # Inspect decoded entities too, but retain the original output. Stripping
+                # arbitrary tags could erase an entire malformed outcome such as <I/O Error: ...>.
+                decoded = unescape(text)
+                if (
+                    re.search(r"<\s*/?\s*[A-Za-z][^>\n]*>", decoded)
+                    or "```" in decoded
+                    or re.search(
+                        r"\[\s*SYSTEM\b|^\s*(?:I/O\s+Error|SYSTEM INJECTION)\s*:",
+                        decoded,
+                        re.IGNORECASE | re.MULTILINE,
+                    )
+                ):
+                    raise LLMResolutionError(
+                        "Narrative must be plain prose without markup or technical status "
+                        "messages; describe disconnects only through in-world consequences."
+                    )
             if not result.global_narrative.strip() or (
                 title_required and not (result.round_title or "").strip()
             ):
@@ -710,6 +749,10 @@ class LLMContextManager:
             error = type(exc).__name__
             response = getattr(exc, "completion", response)
             logger.warning("LLM %s failed: %s", kind, error)
+            if isinstance(exc, APIConnectionError) and not isinstance(exc, APITimeoutError):
+                raise LLMBackendUnavailableError(
+                    "Could not connect to the LLM backend; no result committed."
+                ) from exc
             raise LLMResolutionError(
                 "The model request failed or was truncated; no result committed."
             ) from exc
