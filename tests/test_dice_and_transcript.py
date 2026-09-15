@@ -16,7 +16,7 @@ def test_roll_d100_includes_both_boundaries(monkeypatch) -> None:
     monkeypatch.setattr(dice.secrets, "randbelow", lambda upper: upper - 1)
     assert dice.roll_d100() == 100
     assert dice.describe_roll(0) == "catastrophic failure"
-    assert dice.describe_roll(100) == "perfect success"
+    assert dice.describe_roll(100) == "perfect success, extra benefits"
 
 
 def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:

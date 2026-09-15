@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from core.config import settings
-from core.schemas import ContextSummary, DicePlan, RoundResolution
+from core.schemas import ContextSummary, DicePlan, RoundResolution, SummaryAudit
 from logic.llm_manager import LLMContextManager, LLMResolutionError
 
 
@@ -35,15 +35,32 @@ class FakeClient:
             raise result
         if result is None:
             schema = kwargs["response_format"]
-            if schema is DicePlan:
-                result = DicePlan(rolls={"Alice": True}, hidden_rolls=["Alice"])
-            elif schema is ContextSummary:
+            if issubclass(schema, DicePlan):
+                names = schema.model_json_schema()["properties"]["rolls"].get("required", ["Alice"])
+                result = DicePlan(
+                    rolls={name: True for name in names},
+                    hidden_rolls=(
+                        names
+                        if schema.model_json_schema()["properties"]["hidden_rolls"].get(
+                            "maxItems", 1
+                        )
+                        else []
+                    ),
+                )
+            elif schema is SummaryAudit:
+                result = SummaryAudit(preserved=True, corrections=[])
+            elif issubclass(schema, ContextSummary):
                 result = memory()
             else:
                 result = RoundResolution(
                     round_title="The gate",
                     global_narrative="A breeze rises.",
-                    player_resolutions={"Alice": "Alice waits."},
+                    player_resolutions={
+                        name: f"{name} waits."
+                        for name in schema.model_json_schema()["properties"][
+                            "player_resolutions"
+                        ].get("required", ["Alice"])
+                    },
                 )
         return SimpleNamespace(
             choices=[
@@ -90,6 +107,7 @@ def test_every_request_caps_output_and_counts_backend_template(schema, kind, pro
 
     async def run():
         settings.llm.provider = provider
+        settings.llm.enable_thinking = False
         client = FakeClient()
         manager = LLMContextManager(client)
         seen = []
@@ -110,7 +128,10 @@ def test_every_request_caps_output_and_counts_backend_template(schema, kind, pro
         assert (
             "max_tokens" if cap_key == "max_completion_tokens" else "max_completion_tokens"
         ) not in request
+        if provider == "openai":
+            assert "extra_body" not in request
         if provider == "compatible":
+            assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
             assert seen == ["/apply-template", "/tokenize"]
             assert manager.token_count_method.startswith("backend")
         await manager.close()
@@ -138,6 +159,30 @@ def test_schema_output_and_margin_can_reject_a_short_message(kind, schema):
         with pytest.raises(LLMResolutionError, match="budget"):
             await manager._parse([{"role": "user", "content": "x"}], schema, kind)
         assert not client.calls
+
+    asyncio.run(run())
+
+
+def test_context_discovery_recovers_after_backend_outage():
+    async def run():
+        settings.llm.provider = "compatible"
+        manager = LLMContextManager(FakeClient())
+        requests = []
+
+        def backend(request):
+            requests.append(request)
+            if len(requests) == 1:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"default_generation_settings": {"n_ctx": 128000}})
+
+        manager._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
+        await manager.discover_context_window()
+        assert not manager._context_discovered
+        await manager.discover_context_window()
+        assert manager.context_window_size == 128000
+        await manager.discover_context_window()
+        assert len(requests) == 2
+        await manager.close()
 
     asyncio.run(run())
 
@@ -254,7 +299,7 @@ def test_failed_empty_or_expanding_summary_preserves_original(result):
         manager = LLMContextManager(client)
         manager.memory = {"role": "user", "content": memory().model_dump_json()}
         manager.history = [
-            {"role": "user", "content": "earlier action " * 180},
+            {"role": "user", "content": "earlier action " * 160},
             {"role": "assistant", "content": "earlier state " * 100},
         ]
         previous_memory, previous_history = manager.memory, manager.history
@@ -365,7 +410,7 @@ def test_cancelling_compaction_keeps_original_memory_and_history():
         manager = LLMContextManager(client)
         manager.memory = {"role": "user", "content": memory().model_dump_json()}
         manager.history = [
-            {"role": "user", "content": "earlier action " * 180},
+            {"role": "user", "content": "earlier action " * 160},
             {"role": "assistant", "content": "earlier state " * 100},
         ]
         previous_memory, previous_history = manager.memory, manager.history
