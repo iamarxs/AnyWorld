@@ -34,6 +34,10 @@ class LLMConfig(BaseModel):
     token_safety_margin: int = Field(default=256, ge=64)
     request_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
     max_retries: int = Field(default=1, ge=0, le=3)
+    enable_thinking: bool | None = None
+    planner_system_prompt: str | None = None
+    compaction_target_fraction: float = Field(default=0.75, ge=0.5, le=1.0)
+    history_round_limit: int | None = Field(default=None, ge=2, le=100)
 
 
 class ServerConfig(BaseModel):
