@@ -369,16 +369,31 @@ function handleMessage(message) {
     } else if (type === "token_usage") {
         elements.tokenUsage.hidden = false;
         elements.tokenUsage.title = payload.counting_method || "Estimated token usage";
-        const used = Math.max(0, Number(payload.approximate_tokens) || 0);
+        const used = Math.max(0, Number(payload.retained_context_tokens ?? payload.approximate_tokens) || 0);
         const limit = Math.max(1, Number(payload.context_window_size) || used || 1);
         const ratio = Math.min(1, used / limit);
         elements.tokenChart.style.background =
             `conic-gradient(var(--accent) ${ratio * 360}deg, var(--border) ${ratio * 360}deg)`;
         elements.tokenChart.setAttribute(
             "aria-label",
-            `Token usage: ${used.toLocaleString()} of ${limit.toLocaleString()}`,
+            `Estimated retained context: ${used.toLocaleString()} of ${limit.toLocaleString()}`,
         );
-        elements.tokenCount.textContent = `≈ ${used.toLocaleString()} / ${limit.toLocaleString()} tokens`;
+        const formatTotal = (value) => value == null ? "unknown" : value.toLocaleString();
+        const round = payload.round || {};
+        const game = payload.game || {};
+        elements.tokenCount.textContent = `≈ ${used.toLocaleString()} / ${limit.toLocaleString()}`;
+        document.getElementById("token-details").textContent = [
+            "Retained context is estimated; next input, schema and output are excluded.",
+            `Round tokens: ${formatTotal(round.total_tokens)} (input ${formatTotal(round.input_tokens)}, output ${formatTotal(round.completion_tokens)})`,
+            `Game tokens: ${formatTotal(game.total_tokens)}`,
+            `Round cache reads: ${formatTotal(round.cached_tokens)}`,
+            `llama.cpp processed / reused: ${formatTotal(round.processed_prompt_tokens)} / ${formatTotal(round.reused_prompt_tokens)}`,
+            `Requests: ${round.attempts || 0} · Errors: ${round.errors || 0} · Retries: ${round.retries || 0}`,
+            `Failed round attempts: ${payload.round_failures || 0}`,
+            `Request time: ${(round.latency_seconds || 0).toFixed(2)}s`,
+            `Round work time: ${(payload.round_work_seconds || 0).toFixed(2)}s (includes budgeting and retries)`,
+            "Unknown means the provider did not report every counter; tokens are not a currency cost.",
+        ].join("\n");
     } else if (type === "game_ended") {
         setThinking(false);
         elements.actionInput.disabled = true;
