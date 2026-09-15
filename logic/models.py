@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 import secrets
 from enum import Enum, auto
-from typing import Protocol
+from typing import Any, Protocol
 
 from core.schemas import DicePlan, RoundResolution, ServerEvent
 
@@ -52,6 +52,18 @@ class EventSender(Protocol):
 
 class ResolutionManager(Protocol):
     """Protocol for the LLM resolution backend."""
+
+    def begin_round_usage(self, number: int) -> None:
+        """Group inference consumption, retaining totals across host retries."""
+        ...
+
+    def usage_snapshot(self) -> dict[str, Any]:
+        """Return prompt-free round/game totals and estimated context occupancy."""
+        ...
+
+    def finish_round_usage(self, error: str | None = None) -> None:
+        """Finish timing round work, excluding the human wait before a retry."""
+        ...
 
     def set_genesis(self, scenario: str, guidance: str = "") -> None:
         """Set the initial scenario and optional guidance."""
