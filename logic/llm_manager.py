@@ -4,16 +4,22 @@ import asyncio
 import json
 import logging
 import re
+from time import perf_counter
 from typing import Any
+from functools import lru_cache
+from collections import OrderedDict
+from hashlib import sha256
 
 import httpx
 from openai import AsyncOpenAI, OpenAIError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, create_model
 import tiktoken
 
 from core.config import settings
-from core.schemas import ContextSummary, DicePlan, RoundResolution
+from core.schemas import ContextSummary, DicePlan, RoundResolution, SummaryAudit
+from logic.usage import UsageTotals, counter
 from logic.dice import describe_roll
+from logic.presentation import name_resolution
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +28,62 @@ class LLMResolutionError(RuntimeError):
     """Raised when the LLM cannot produce valid structured output."""
 
 
+@lru_cache(maxsize=32)
+def participant_schema(
+    base: type[BaseModel], names: tuple[str, ...], allow_hidden: bool = False
+) -> type[BaseModel]:
+    """Constrain generated object keys to the actual party, including empty openings."""
+    field = (
+        "rolls"
+        if base is DicePlan
+        else "player_resolutions" if base is RoundResolution else "player_states"
+    )
+    value = bool if base is DicePlan else str
+    kind = "boolean" if base is DicePlan else "string"
+    fields = {
+        field: (
+            dict[str, value],
+            Field(
+                json_schema_extra={
+                    "properties": {
+                        name: {"type": kind, **({"minLength": 1} if kind == "string" else {})}
+                        for name in names
+                    },
+                    "required": list(names),
+                    "additionalProperties": False,
+                }
+            ),
+        )
+    }
+    if base is DicePlan:
+        fields["hidden_rolls"] = (
+            list[str],
+            Field(
+                json_schema_extra={
+                    "items": (
+                        {"type": "string", "enum": list(names)} if names else {"type": "string"}
+                    ),
+                    "maxItems": len(names) if allow_hidden else 0,
+                    "uniqueItems": True,
+                }
+            ),
+        )
+    elif base is RoundResolution and names:
+        fields["global_narrative"] = (str, Field(min_length=1))
+        fields["round_title"] = (str | None, Field(default=None, json_schema_extra={"const": None}))
+    elif base is ContextSummary:
+        fields["world_state"] = (str, Field(min_length=1))
+    return create_model(base.__name__, __base__=base, **fields)
+
+
 class LLMContextManager:
     """Keep immutable genesis, durable memory and recent rounds within a budget."""
 
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
         """Initialize the manager with an optional client and configured context."""
-        self.client = client
+        self.client = (
+            client.with_options(max_retries=0) if isinstance(client, AsyncOpenAI) else client
+        )
         self._http: httpx.AsyncClient | None = None
         # A configured value is the fallback; successful llama.cpp discovery takes precedence.
         self.context_window_size = settings.llm.context_window_size
@@ -38,12 +94,26 @@ class LLMContextManager:
         self.encoding = None
         self._encoding_loaded = False
         self.token_count_method = "conservative UTF-8 estimate"
+        self._text_counts: OrderedDict = OrderedDict()
+        self._request_counts: OrderedDict = OrderedDict()
+        self._template_identity = "undiscovered"
+        self._last_response_text: str | None = None
         self.system_prompt_tokens = self._count_tokens(settings.llm.system_prompt)
         self.genesis_state: dict[str, str] | None = None
         self.history: list[dict[str, str]] = []
         self.memory: dict[str, str] | None = None
         self.private_guidance = ""
+        self._known_player_names: list[str] = []
         self.last_token_usage = self.system_prompt_tokens + 3
+        self.game_usage = UsageTotals()
+        self.round_usage = UsageTotals()
+        self.usage_round: int | None = None
+        self.last_request: dict[str, Any] | None = None
+        self.round_usage_by_kind: dict[str, UsageTotals] = {}
+        self.round_work_seconds = 0.0
+        self.round_failures = 0
+        self.last_round_error: str | None = None
+        self._round_started: float | None = None
 
     @staticmethod
     def _create_client() -> AsyncOpenAI:
@@ -51,7 +121,7 @@ class LLMContextManager:
         client_options: dict[str, Any] = {
             "api_key": settings.llm.api_key,
             "timeout": settings.llm.request_timeout_seconds,
-            "max_retries": settings.llm.max_retries,
+            "max_retries": 0,  # Each retry is measured explicitly below.
         }
         if settings.llm.provider == "compatible":
             client_options["base_url"] = settings.llm.endpoint
@@ -76,8 +146,21 @@ class LLMContextManager:
             )
         self.genesis_state = {"role": "user", "content": content}
         self.history.clear()
+        self._text_counts.clear()
+        self._request_counts.clear()
+        self._last_response_text = None
         self.memory = None
         self.private_guidance = guidance
+        self._known_player_names = []
+        self.game_usage = UsageTotals()
+        self.round_usage = UsageTotals()
+        self.usage_round = None
+        self.last_request = None
+        self.round_usage_by_kind = {}
+        self.round_work_seconds = 0.0
+        self.round_failures = 0
+        self.last_round_error: str | None = None
+        self._round_started = None
 
     async def generate_initial_state(self) -> RoundResolution:
         """Generate the initial scenario state before players join."""
@@ -93,11 +176,19 @@ class LLMContextManager:
                 "an empty object."
             ),
         }
-        return await self._request(prompt, RoundResolution, remember=True, kind="initial")
+        return await self._request(
+            prompt,
+            participant_schema(RoundResolution, ()),
+            remember=True,
+            kind="initial",
+            expected_names=(),
+            title_required=True,
+        )
 
     async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
         """Introduce the joined players in the scenario when play begins."""
         logger.info("Generating start state for %d players", len(player_names))
+        self._known_player_names = list(dict.fromkeys([*self._known_player_names, *player_names]))
         names = ", ".join(player_names)
         prompt = {
             "role": "user",
@@ -111,7 +202,13 @@ class LLMContextManager:
                 "story hook. Set player_resolutions to an empty object."
             ),
         }
-        return await self._request(prompt, RoundResolution, remember=True, kind="initial")
+        return await self._request(
+            prompt,
+            participant_schema(RoundResolution, ()),
+            remember=True,
+            kind="initial",
+            expected_names=(),
+        )
 
     async def plan_dice(self, round_buffer: dict[str, str], current_state: str = "") -> DicePlan:
         """Ask the DM which actions need uncertainty resolved by a d100.
@@ -120,6 +217,7 @@ class LLMContextManager:
         guidance, durable memory and recent rounds so unchanged facts still affect checks.
         """
         logger.info("Planning dice for %d player actions", len(round_buffer))
+        self._known_player_names = list(dict.fromkeys([*self._known_player_names, *round_buffer]))
         actions = "\n".join(f"{name}: {action}" for name, action in round_buffer.items())
         prompt = {
             "role": "user",
@@ -131,7 +229,13 @@ class LLMContextManager:
                 f"Current game state:\n{current_state}\n\nActions:\n{actions}"
             ),
         }
-        return await self._request(prompt, DicePlan, remember=False, kind="dice")
+        return await self._request(
+            prompt,
+            participant_schema(DicePlan, tuple(round_buffer), bool(self.private_guidance)),
+            remember=False,
+            kind="dice",
+            expected_names=tuple(round_buffer),
+        )
 
     async def generate_resolution(
         self,
@@ -145,6 +249,7 @@ class LLMContextManager:
             len(round_buffer),
             len(dice_results or {}),
         )
+        self._known_player_names = list(dict.fromkeys([*self._known_player_names, *round_buffer]))
         actions = "\n".join(
             f"{name} attempts to: {action}" for name, action in round_buffer.items()
         )
@@ -169,17 +274,22 @@ class LLMContextManager:
             "role": "user",
             "content": (
                 "Resolve these actions as one simultaneous, causally coherent round. "
+                "Set round_title to null; the established title is unchanged. "
                 "Reconcile interactions with the target's action and established facts. Move "
                 "the story forward with concrete outcomes. Use each exact player name as its "
                 "player_resolutions key, explicitly name that player, and emit no outcome for "
                 "absent players.\n\nCurrent round actions:\n"
-                f"{actions}{roll_context}"
+                f"{actions}{roll_context}\nRequired player_resolutions keys: "
+                + json.dumps(list(round_buffer), ensure_ascii=False)
+                + ". Give each a nonempty outcome. global_narrative must be nonempty even "
+                "when the world has not otherwise changed."
             ),
         }
         return await self._request(
             prompt,
-            RoundResolution,
+            participant_schema(RoundResolution, tuple(round_buffer)),
             remember=True,
+            expected_names=tuple(round_buffer),
             private_rolls={
                 name: value
                 for name, value in (dice_results or {}).items()
@@ -187,17 +297,21 @@ class LLMContextManager:
             },
         )
 
-    def _fixed_messages(self) -> list[dict[str, str]]:
+    def _fixed_messages(self, kind: str = "round") -> list[dict[str, str]]:
         """Return the immutable prefix messages for every request."""
+        system = self.system_prompt
+        if kind == "dice" and settings.llm.planner_system_prompt:
+            system = {"role": "system", "content": settings.llm.planner_system_prompt}
         return [
-            self.system_prompt,
+            system,
             *([self.genesis_state] if self.genesis_state else []),
             *([self.memory] if self.memory else []),
         ]
 
     def _output_limit(self, kind: str) -> int:
         """Return the configured output token cap for a request kind."""
-        return getattr(settings.llm, f"{kind}_output_tokens")
+        cap_kind = "summary" if kind == "summary_audit" else kind
+        return getattr(settings.llm, f"{cap_kind}_output_tokens")
 
     def _schema_text(self, schema: type[BaseModel]) -> str:
         """Return the compact JSON schema text for a response model."""
@@ -228,7 +342,42 @@ class LLMContextManager:
         base = settings.llm.endpoint.rstrip("/")
         return base[:-3] if base.endswith("/v1") else base
 
+    @staticmethod
+    def _template_options() -> dict[str, Any]:
+        """Use the same explicit llama.cpp template options for counting and generation."""
+        if settings.llm.provider == "compatible" and settings.llm.enable_thinking is not None:
+            return {"chat_template_kwargs": {"enable_thinking": settings.llm.enable_thinking}}
+        return {}
+
     async def _input_tokens(self, messages: list[dict[str, str]], schema: type[BaseModel]) -> int:
+        """Reuse bounded counts for identical formatted requests and tokenizer identity."""
+        identity = (
+            settings.llm.provider,
+            settings.llm.endpoint,
+            settings.llm.model_name,
+            settings.llm.tokenizer_encoding,
+            self._template_identity,
+            self._template_options(),
+            self._schema_text(schema),
+            messages,
+        )
+        key = sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).digest()
+        if key in self._request_counts:
+            count, method = self._request_counts[key]
+            self._request_counts.move_to_end(key)
+            self.token_count_method = method
+            return count
+        count = await self._uncached_input_tokens(messages, schema)
+        # Retry unavailable backend tokenization on the next call rather than pinning a failure.
+        if self.token_count_method != "conservative UTF-8 estimate":
+            self._request_counts[key] = (count, self.token_count_method)
+            if len(self._request_counts) > 128:
+                self._request_counts.popitem(last=False)
+        return count
+
+    async def _uncached_input_tokens(
+        self, messages: list[dict[str, str]], schema: type[BaseModel]
+    ) -> int:
         """Count input tokens using the backend tokenizer or a conservative estimate."""
         if settings.llm.provider == "openai" and not self._encoding_loaded:
             self._encoding_loaded = True
@@ -244,7 +393,8 @@ class LLMContextManager:
             try:
                 http = await self._http_client()
                 rendered = await http.post(
-                    self._backend_base() + "/apply-template", json={"messages": messages}
+                    self._backend_base() + "/apply-template",
+                    json={"messages": messages, **self._template_options()},
                 )
                 rendered.raise_for_status()
                 prompt = rendered.json()["prompt"]
@@ -276,7 +426,7 @@ class LLMContextManager:
             "content": json.dumps({"actions": actions, "state": current_state}, ensure_ascii=False),
         }
         for schema, kind in ((RoundResolution, "round"), (DicePlan, "dice")):
-            count = await self._input_tokens([*self._fixed_messages(), prompt], schema)
+            count = await self._input_tokens([*self._fixed_messages(kind), prompt], schema)
             if not self._fits(count + 1_024 + 256 * len(actions), kind):
                 raise LLMResolutionError(
                     "Scenario, durable memory and combined actions exceed the context budget. "
@@ -292,20 +442,97 @@ class LLMContextManager:
         include_history: bool = True,
         kind: str = "round",
         private_rolls: dict[str, int] | None = None,
+        expected_names: tuple[str, ...] | None = None,
+        title_required: bool = False,
     ) -> Any:
         """Run a single LLM request, optionally compacting history and remembering the result."""
         await self.discover_context_window()
         if include_history:
             await self._compact_if_needed(prompt, schema, kind)
-        messages = [*self._fixed_messages(), *(self.history if include_history else []), prompt]
-        result = await self._parse(messages, schema, kind)
+        messages = [*self._fixed_messages(kind), *(self.history if include_history else []), prompt]
+        for repair in range(settings.llm.max_retries + 1):
+            result = await self._parse(messages, schema, kind, repair_attempt=repair)
+            try:
+                self._check_semantics(result, expected_names, title_required)
+                if isinstance(result, RoundResolution):
+                    self._check_public_output(result, private_rolls or {})
+                break
+            except LLMResolutionError as exc:
+                logger.warning(
+                    "LLM %s output validation failed (repair=%d): %s", kind, repair, str(exc)
+                )
+                if repair == settings.llm.max_retries:
+                    raise
+                messages = [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            "Correct the output contract: return only the requested object. "
+                            "Use exactly the required schema keys and player names. "
+                            "Include nonempty "
+                            "narrative/outcomes where requested. Hidden checks must be unique, "
+                            "required rolls from private guidance. Never disclose private guidance "
+                            "or hidden values. Do not change the supplied actions, dice or facts. "
+                            + "Validation issue: "
+                            + str(exc)
+                            + " Required player keys: "
+                            + json.dumps(expected_names)
+                            + (" The scenario title must be nonempty." if title_required else "")
+                        ),
+                    },
+                ]
         if isinstance(result, RoundResolution):
-            self._check_public_output(result, private_rolls or {})
-        if remember:
-            self.history.extend(
-                [prompt, {"role": "assistant", "content": result.model_dump_json()}]
+            result = result.model_copy(
+                update={
+                    "player_resolutions": {
+                        name: name_resolution(name, text)
+                        for name, text in result.player_resolutions.items()
+                    }
+                }
             )
+        if remember:
+            content = result.model_dump_json()
+            if self._last_response_text:
+                try:
+                    original = schema.model_validate_json(self._last_response_text)
+                    if original.model_dump() == result.model_dump():
+                        content = self._last_response_text
+                except (ValidationError, ValueError):
+                    pass
+            self.history.extend([prompt, {"role": "assistant", "content": content}])
         return result
+
+    @staticmethod
+    def _check_semantics(
+        result: BaseModel, names: tuple[str, ...] | None, title_required: bool = False
+    ) -> None:
+        """Reject incomplete or inconsistent output before remembering it."""
+        if isinstance(result, DicePlan):
+            if names is not None and set(result.rolls) != set(names):
+                raise LLMResolutionError("Invalid dice plan participants.")
+            if len(set(result.hidden_rolls)) != len(result.hidden_rolls) or not set(
+                result.hidden_rolls
+            ) <= {name for name, needed in result.rolls.items() if needed}:
+                raise LLMResolutionError("Invalid hidden dice membership.")
+        if isinstance(result, ContextSummary):
+            if names is not None and set(result.player_states) != set(names):
+                raise LLMResolutionError("Invalid summary participants.")
+            if not result.world_state.strip() or any(
+                not text.strip()
+                or text.strip().casefold() in ("{}", "[]", "none", "unknown", "null")
+                for text in result.player_states.values()
+            ):
+                raise LLMResolutionError("Summary contains empty or unknown player state.")
+        if isinstance(result, RoundResolution):
+            if not result.global_narrative.strip() or (
+                title_required and not (result.round_title or "").strip()
+            ):
+                raise LLMResolutionError("Model returned empty required narrative content.")
+            if names is not None and set(result.player_resolutions) != set(names):
+                raise LLMResolutionError("Invalid resolution participants.")
+            if any(not value.strip() for value in result.player_resolutions.values()):
+                raise LLMResolutionError("Model returned an empty player outcome.")
 
     def _check_public_output(self, result: RoundResolution, private_rolls: dict[str, int]) -> None:
         """Reject direct guidance echoes and explicit hidden dice disclosures.
@@ -333,17 +560,95 @@ class LLMContextManager:
                     "Model output disclosed a private check; no result committed."
                 )
 
+    def begin_round_usage(self, number: int) -> None:
+        """Start accounting once per round; host retries keep the same totals."""
+        if self.usage_round != number:
+            self.usage_round = number
+            self.round_usage = UsageTotals()
+            self.round_usage_by_kind = {}
+            self.round_work_seconds = 0.0
+            self.round_failures = 0
+            self.last_round_error = None
+            self._round_started = None
+        if self._round_started is None:
+            self._round_started = perf_counter()
+
+    def finish_round_usage(self, error: str | None = None) -> None:
+        """Include budgeting, tokenization and retry waits in round work time."""
+        if self._round_started is not None:
+            self.round_work_seconds += perf_counter() - self._round_started
+            self._round_started = None
+            self.round_failures += error is not None
+            self.last_round_error = error
+
+    def usage_snapshot(self) -> dict[str, Any]:
+        """Separate estimated retained messages from billed request consumption."""
+        return {
+            "round_number": self.usage_round,
+            "round_failures": self.round_failures,
+            "last_round_error": self.last_round_error,
+            "round_work_seconds": self.round_work_seconds
+            + (perf_counter() - self._round_started if self._round_started is not None else 0),
+            "round": self.round_usage.snapshot(),
+            "game": self.game_usage.snapshot(),
+            "round_by_kind": {
+                kind: usage.snapshot() for kind, usage in self.round_usage_by_kind.items()
+            },
+            "last_request": self.last_request,
+            "retained_context_tokens": self._context_size([*self._fixed_messages(), *self.history]),
+            "context_window_size": self.context_window_size,
+            "counting_method": "Retained messages: estimated; excludes next input/schema/output",
+        }
+
     async def _parse(
-        self, messages: list[dict[str, str]], schema: type[BaseModel], kind: str
+        self,
+        messages: list[dict[str, str]],
+        schema: type[BaseModel],
+        kind: str,
+        repair_attempt: int = 0,
     ) -> Any:
-        """Send a request, parse and validate the structured response."""
+        """Measure each attempt, including SDK-compatible transient retries."""
         count = await self._input_tokens(messages, schema)
         if not self._fits(count, kind):
             raise LLMResolutionError(
                 "Request exceeds the context budget; history and durable memory were preserved."
             )
+        try:
+            async with asyncio.timeout(settings.llm.request_timeout_seconds):
+                for attempt in range(settings.llm.max_retries + 1):
+                    try:
+                        return await self._parse_attempt(
+                            messages, schema, kind, count, attempt, repair_attempt
+                        )
+                    except LLMResolutionError as exc:
+                        cause = exc.__cause__
+                        status = getattr(cause, "status_code", None)
+                        transient = isinstance(cause, OpenAIError) and (
+                            status in (408, 409, 429)
+                            or (status is not None and status >= 500)
+                            or type(cause).__name__ in ("APIConnectionError", "APITimeoutError")
+                        )
+                        if not transient or attempt == settings.llm.max_retries:
+                            raise
+                        await asyncio.sleep(min(0.5 * 2**attempt, 8.0))
+        except TimeoutError as exc:
+            raise LLMResolutionError("The model request failed: deadline exceeded.") from exc
+
+    async def _parse_attempt(
+        self,
+        messages: list[dict[str, str]],
+        schema: type[BaseModel],
+        kind: str,
+        count: int,
+        attempt: int,
+        repair_attempt: int = 0,
+    ) -> Any:
+        """Send and account for one provider attempt."""
         if self.client is None:
             self.client = self._create_client()
+        started = perf_counter()
+        response = None
+        error = None
         cap_key = "max_tokens" if settings.llm.provider == "compatible" else "max_completion_tokens"
         try:
             async with asyncio.timeout(settings.llm.request_timeout_seconds):
@@ -351,6 +656,9 @@ class LLMContextManager:
                     model=settings.llm.model_name,
                     messages=messages,
                     response_format=schema,
+                    **(
+                        {"extra_body": self._template_options()} if self._template_options() else {}
+                    ),
                     **{cap_key: self._output_limit(kind)},
                 )
             choice = response.choices[0]
@@ -361,30 +669,62 @@ class LLMContextManager:
             parsed = choice.message.parsed
             if parsed is None:
                 raise LLMResolutionError("Model returned no validated result.")
-            result = schema.model_validate(parsed)
+            result = schema.model_validate(
+                parsed.model_dump() if isinstance(parsed, BaseModel) else parsed
+            )
+            self._last_response_text = getattr(choice.message, "content", None)
+        except asyncio.CancelledError:
+            error = "CancelledError"
+            raise
         except LLMResolutionError:
+            error = "LLMResolutionError"
             raise
         except (
             OpenAIError,
             ValidationError,
             IndexError,
+            AttributeError,
             TypeError,
             ValueError,
             TimeoutError,
         ) as exc:
             # Provider exception bodies may contain private prompts. Keep them out of
             # public errors and logs; retain only the exception class for diagnosis.
-            logger.warning("LLM %s failed: %s", kind, type(exc).__name__)
+            error = type(exc).__name__
+            response = getattr(exc, "completion", response)
+            logger.warning("LLM %s failed: %s", kind, error)
             raise LLMResolutionError(
                 "The model request failed or was truncated; no result committed."
             ) from exc
-        self.last_token_usage = count
-        usage = getattr(response, "usage", None)
-        if usage is not None and getattr(usage, "total_tokens", None) is not None:
-            self.last_token_usage = int(usage.total_tokens)
-        logger.info(
-            "LLM %s tokens=%d counting=%s", kind, self.last_token_usage, self.token_count_method
-        )
+        finally:
+            usage = getattr(response, "usage", None)
+            timings = getattr(response, "timings", None)
+            record = {
+                "kind": kind,
+                "round_number": self.usage_round,
+                "retry": attempt > 0 or repair_attempt > 0,
+                "repair_attempt": repair_attempt,
+                "attempt": attempt + repair_attempt + 1,
+                "estimated_input_tokens": count,
+                "counting_method": self.token_count_method,
+                "input_tokens": counter(usage, "prompt_tokens"),
+                "completion_tokens": counter(usage, "completion_tokens"),
+                "total_tokens": counter(usage, "total_tokens"),
+                "cached_tokens": counter(
+                    getattr(usage, "prompt_tokens_details", None), "cached_tokens"
+                ),
+                "processed_prompt_tokens": counter(timings, "prompt_n"),
+                "reused_prompt_tokens": counter(timings, "cache_n"),
+                "latency_seconds": perf_counter() - started,
+                "error": error,
+            }
+            self.last_request = record
+            self.game_usage.add(record)
+            if self.usage_round is not None:
+                self.round_usage.add(record)
+                self.round_usage_by_kind.setdefault(kind, UsageTotals()).add(record)
+            self.last_token_usage = record["total_tokens"] or count
+            logger.info("LLM usage %s", json.dumps(record, sort_keys=True))
         return result
 
     async def _compact_if_needed(
@@ -392,11 +732,28 @@ class LLMContextManager:
     ) -> None:
         """Merge old pairs into durable memory transactionally; never FIFO-forget."""
         original_memory, original_history = self.memory, self.history
+        compacted = False
+        summary_schema = (
+            participant_schema(ContextSummary, tuple(self._known_player_names))
+            if self._known_player_names
+            else ContextSummary
+        )
         try:
             while True:
-                messages = [*self._fixed_messages(), *self.history, prompt]
+                messages = [*self._fixed_messages(kind), *self.history, prompt]
                 count = await self._input_tokens(messages, schema)
-                if self._fits(count, kind):
+                fits = self._fits(count, kind)
+                history_limit = settings.llm.history_round_limit
+                checkpoint_due = history_limit is not None and len(self.history) > 2 * history_limit
+                target_fits = (
+                    count + self._output_limit(kind) + settings.llm.token_safety_margin
+                    <= self.context_window_size * settings.llm.compaction_target_fraction
+                )
+                if (
+                    fits
+                    and not checkpoint_due
+                    and (not compacted or target_fits or not self.history)
+                ):
                     return
                 if not self.history:
                     raise LLMResolutionError("Durable memory and current input do not fit.")
@@ -404,7 +761,11 @@ class LLMContextManager:
                 # included exactly once so later summaries replace obsolete facts.
                 selected = 0
                 compact_messages = []
-                for length in range(2, len(self.history) + 1, 2):
+                prefix_limit = len(self.history)
+                if checkpoint_due and fits:
+                    # Freeze the ledger between checkpoints and retain the newest half of rounds.
+                    prefix_limit -= 2 * max(1, history_limit // 2)
+                for length in range(2, prefix_limit + 1, 2):
                     candidate = [
                         *self._fixed_messages(),
                         *self.history[:length],
@@ -420,13 +781,19 @@ class LLMContextManager:
                         },
                     ]
                     if not self._fits(
-                        await self._input_tokens(candidate, ContextSummary), "summary"
+                        await self._input_tokens(candidate, summary_schema)
+                        + self._output_limit("summary")
+                        + 512,
+                        "summary",
                     ):
                         break
                     selected, compact_messages = length, candidate
+                if not selected and fits:
+                    return
                 if not selected:
                     raise LLMResolutionError("History cannot be safely summarized within budget.")
-                summary = await self._parse(compact_messages, ContextSummary, "summary")
+                summary = await self._parse(compact_messages, summary_schema, "summary")
+                self._check_semantics(summary, tuple(self._known_player_names) or None)
                 if not summary.world_state.strip():
                     raise LLMResolutionError(
                         "Summary has no world state; original memory retained."
@@ -442,8 +809,34 @@ class LLMContextManager:
                     raise LLMResolutionError(
                         "Summary did not reduce context; original memory retained."
                     )
+                audit = await self._parse(
+                    [
+                        *compact_messages,
+                        {"role": "assistant", "content": summary.model_dump_json()},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Audit proposed memory against the original context above. "
+                                "Check every lasting fact: identities, locations, injuries, "
+                                "possessions, exact resource counts, consumed items, NPC "
+                                "relationships, private rules, promises and exact deadlines. "
+                                "Paraphrases are fine; omissions, inventions or changes are not. "
+                                "Set preserved=true only if all durable facts are preserved "
+                                "and corrections is empty. Otherwise set preserved=false and "
+                                "list concise corrections. Ignore disposable prose."
+                            ),
+                        },
+                    ],
+                    SummaryAudit,
+                    "summary_audit",
+                )
+                if not audit.preserved or audit.corrections:
+                    raise LLMResolutionError(
+                        "Summary changed durable facts; original memory retained."
+                    )
                 self.memory = memory
                 self.history = self.history[selected:]
+                compacted = True
         except BaseException:
             # Cancellation must not leave a half-compacted conversation either.
             self.memory, self.history = original_memory, original_history
@@ -453,12 +846,20 @@ class LLMContextManager:
         """Discover the backend context window size when available."""
         if self._context_discovered or settings.llm.provider != "compatible":
             return
-        self._context_discovered = True
         try:
             http = await self._http_client()
             response = await http.get(self._backend_base() + "/props")
             response.raise_for_status()
             props = response.json()
+            self._template_identity = sha256(
+                json.dumps(
+                    {
+                        name: props.get(name)
+                        for name in ("chat_template", "model_path", "build_info")
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
             # Only use the generation slot's context, not an ambiguous global n_ctx.
             discovered = props.get("default_generation_settings", {}).get("n_ctx")
             if (
@@ -467,6 +868,7 @@ class LLMContextManager:
                 and discovered >= 2048
             ):
                 self.context_window_size = discovered
+                self._context_discovered = True
         except (httpx.HTTPError, ValueError, TypeError, AttributeError):
             pass
 
@@ -481,10 +883,20 @@ class LLMContextManager:
 
     def _count_tokens(self, content: str) -> int:
         """Count tokens in a string using the encoding or a byte estimate."""
-        if self.encoding is not None:
-            return len(self.encoding.encode(content, disallowed_special=()))
-        # UTF-8 bytes are conservative for byte/subword tokenizers, unlike len/4.
-        return len(content.encode("utf-8"))
+        encoded = content.encode("utf-8")
+        key = (self.encoding, sha256(encoded).digest())
+        if key in self._text_counts:
+            self._text_counts.move_to_end(key)
+            return self._text_counts[key]
+        count = (
+            len(self.encoding.encode(content, disallowed_special=()))
+            if self.encoding is not None
+            else len(encoded)
+        )
+        self._text_counts[key] = count
+        if len(self._text_counts) > 512:
+            self._text_counts.popitem(last=False)
+        return count
 
     def _context_size(self, messages: list[dict[str, str]]) -> int:
         """Estimate the total token size of a message list."""
