@@ -7,17 +7,6 @@ Active items are recommendations, not implementation already authorized or under
 
 ## Active
 
-- [ ] **P2 - Instrument total round cost and cache reuse before tuning** - logic/llm_manager.py:\_request, \_compact_if_needed; engine token events; frontend token chart.
-  - last_token_usage represents only the last request; summary usage is absent. It cannot represent total round consumption, cumulative game cost or retained context.
-  - Record request kind, actual/estimated input, completion, available cache counters, latency, errors and retries without logging private prompts. Separate retained-context occupancy from cumulative usage; missing counters mean unknown.
-  - Acceptance: a compacting round accounts for dice, summary and resolution. Baselines cover 2/6 players, short/long actions, cold/warm cache and realistic human delays.
-
-- [ ] **P2 - Benchmark llama.cpp cache interference and stable prefixes** - logic/llm_manager.py:\_request, plan_dice, \_compact_if_needed.
-  - Short dice, long narrative and summary calls alternate on the same model. They may displace reusable context depending on deployed slots/cache settings; this is an unmeasured hypothesis.
-  - Compare default routing with supported slot affinity or separate auxiliary capacity. A separate HTTP client alone does not isolate KV cache. Verify cache_prompt behavior on the deployed build and account for slot memory/context tradeoffs.
-  - Keep system/genesis/schema serialization stable until deliberate compaction. Check whether model_dump_json reserialization changes the token prefix compared with original validated assistant text.
-  - Acceptance: report processed/reused prompt tokens and round latency with unchanged coherence before choosing settings. [llama.cpp server reference](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md).
-
 - [ ] **P2 - Tune OpenAI caching only for supported model/API capabilities** - core/config.py; logic/llm_manager.py.
   - Keep reusable prefixes stable. Select routing/retention settings only when supported by the selected model and Chat Completions endpoint; measure cache reads/writes and total cost with human idle time. Do not pad prompts to seek cache eligibility or transfer llama.cpp flags to OpenAI.
   - Acceptance: unsupported options are omitted and cold/expired caches remain correct. Cached input still consumes context. [OpenAI prompt caching guidance](https://developers.openai.com/api/docs/guides/prompt-caching).
@@ -26,27 +15,13 @@ Active items are recommendations, not implementation already authorized or under
   - Maintain authoritative players, world, NPCs, resources and unresolved threads, applying validated changes from the existing resolution where feasible. Keep rich prose in transcripts/UI instead of retransmitting it indefinitely.
   - Separate immutable premise from changing facts; replace superseded facts and retrieve archived details when relevant. Freeze checkpoints between compactions when practical to preserve prefix reuse. Avoid adding mandatory summarization every round.
   - Acceptance: long-session comparison against current history uses fewer total tokens without regressions in identity, possessions, injuries, causal consistency or unresolved quests.
+  - Experiment (2026-09-15): periodic checkpoints reduced tokens in a synthetic replay but lost a consumed item and changed a deadline. Kept disabled; a new summary audit rejected a faulty live summary and preserved history. A lossless compact ledger remains unfinished. See [report](benchmarks/2026-09-15/REPORT.md).
 
 - [ ] **P2 - Reduce planner and output tokens without degrading adjudication** - logic/llm_manager.py:plan_dice, generate_resolution; core/schemas.py; config.yaml.
   - Planner currently receives the full narrative system prompt. Trial a concise planner prompt with necessary facts, bounded short outcomes and nonduplicative public state; avoid generating new titles the engine discards.
   - Compare two-call behavior against safe deterministic handling of routine actions. A one-call experiment could supply server-generated candidate rolls and let the model select checks, but must evaluate selection bias; never let the LLM invent authoritative rolls.
   - Acceptance: compare total tokens, latency and coherent/fair outcomes. A routine-looking action must still account for contextual hazards.
-
-- [ ] **P2 - Cache message token counts and tune compaction cadence** - logic/llm_manager.py:\_context_size, \_bounded_messages, \_compact_if_needed.
-  - P1 removed FIFO deletion. Remaining: repeated history counting and backend template/tokenizer calls while searching summary prefixes; system_prompt_tokens is retained only as an initial estimate.
-  - Use bounded per-message counts keyed by content/tokenizer identity plus running totals; invalidate on changes. Compact based on the upcoming request to a lower watermark, measuring summary expense and lost prefix reuse.
-  - Acceptance: unchanged history is not repeatedly tokenized; totals equal a fresh calculation after append, compaction and reset. Avoid an unbounded cache of obsolete messages.
-
-- [ ] **P2 - Validate semantics before remembering or committing LLM output** - core/schemas.py; logic/llm_manager.py:\_request; logic/engine.py:\_resolve_round.
-  - Schemas accept missing/extra player names, empty narratives and empty initial titles. Raw output enters history before the engine substitutes missing resolutions, so remembered and displayed outcomes can disagree.
-  - Validate participant keys, required content, dice coverage and hidden-roll membership first. Bound repair attempts and retain actions/rolls on failure instead of discarding the round.
-  - Acceptance: invalid semantic output never advances state or enters memory; retries resolve the same actions with the same dice.
-
-- [ ] **P2 - Fix stale tests and cover context/cache/lifecycle behavior** - tests/test_config_and_schemas.py, tests/test_engine.py, tests/test_server.py.
-  - Remaining work: semantic output-contract coverage and stable-prefix/cache performance tests beyond the P1 regressions.
-  - P1 follow-up corrected the stale title/name expectations, isolated settings, and added budget, summary, privacy, socket and lifecycle regressions. Broader semantic/cache performance coverage remains proposed.
-  - Isolate settings/client creation and use fake clients/temp transcripts. Add the P1 regressions, stable-prefix request tests, and separate opt-in real-backend benchmarks.
-  - Acceptance: deterministic tests run without credentials/network/downloads; mock tests are not presented as measured cache performance.
+  - Experiment (2026-09-15): shorter prompts did not consistently lower total cost and a candidate missed hidden-roll classification. Full planner remains default. Configured Gemma thinking is disabled to reserve bounded output for structured answers. Safe-action overrolling remains a live-model limitation; no one-call or deterministic bypass was adopted. See [report](benchmarks/2026-09-15/REPORT.md).
 
 - [ ] **P2 - Bound slow-socket backpressure** - api/server.py:ConnectionManager.\_send, broadcast_global.
   - gather waits for every socket with no deadline. Failed sends only log and do not mark the player disconnected.
@@ -62,7 +37,7 @@ Active items are recommendations, not implementation already authorized or under
 
 ## Waiting On
 
-- [ ] **Obtain a deployed backend benchmark profile** - Record llama.cpp build/model/chat template, context per slot and cache settings, or exact OpenAI model, plus typical session length. No live benchmark was run and no percentage savings are claimed.
+- [ ] **Measure representative session length and player idle time** - Backend profile received and live runs completed on 2026-09-15: llama.cpp b10964/b29c606e2, Gemma 4 26B A4B Q4_K_XXL, canonical template, one 128000-token slot and q8_0 KV. Benchmarks use a stated 20-second artificial idle interval; typical human delay/session length remain unmeasured. OpenAI is secondary and untested live.
 
 ## Someday
 
@@ -73,9 +48,30 @@ Active items are recommendations, not implementation already authorized or under
 
 ## Done
 
-P1 implementation validated with automated fake-model and ASGI regression tests, Black, Flake8,
-and JavaScript syntax checking. No live LLM benchmark was run; model-specific coherence and cache
-performance still require deployment evaluation.
+- [x] ~~P2 - Instrument total round cost and cache reuse before tuning~~ (2026-09-15)
+  - Per-attempt, round and game totals now include summaries/audits, retries, failures, cancellations, unknown counters and work time. The expandable usage panel separates retained context from consumption. Final deployed llama.cpp matrix: 8/8 successful cases, 2/6 players, short/long actions, cold first calls and warm repeats after 20 seconds of artificial idle. Compaction accounting is also covered offline and by a live summary/audit pair.
+  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
+
+- [x] ~~P2 - Benchmark llama.cpp cache interference and stable prefixes~~ (2026-09-15)
+  - Measured processed/reused prompt counters and latency on the deployed one-slot server, including explicit slot 0. No routing change was justified; separate auxiliary capacity remains unmeasured. Preserve original validated assistant text when normalization makes no change, avoiding unnecessary token-prefix changes. Cold first calls use cache_prompt=false because cache erase returned HTTP 501.
+  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
+
+- [x] ~~P2 - Cache message token counts and tune compaction cadence~~ (2026-09-15)
+  - Added bounded content/tokenizer and request/template/schema count caches; failed tokenizer fallbacks remain retryable. Necessary compaction targets a lower watermark with transactional validation and audit. Optional periodic checkpoints remain disabled after live retention failures. Repeated live request counts agreed (1354 tokens); counting took 4.23 ms initially and 0.31 ms cached. No general percentage saving is claimed.
+  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
+
+- [x] ~~P2 - Validate semantics before remembering or committing LLM output~~ (2026-09-15)
+  - Exact participant schemas and semantic checks reject missing/extra names, empty required content and invalid hidden-roll membership before memory/state commit. Bounded repair retains authoritative actions and dice; failed rounds pause. Normalize displayed/remembered outcomes consistently. Summary auditing rejects detected durable-fact loss transactionally; model-assisted validation cannot prove arbitrary semantic correctness.
+  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
+
+- [x] ~~P2 - Fix stale tests and cover context/cache/lifecycle behavior~~ (2026-09-15)
+  - 88 offline tests pass, with fake clients and isolated settings/transcripts. Added semantic, accounting, cache, template-option and discovery-recovery regressions plus separate opt-in live runners. Black, Flake8 and JavaScript syntax checks pass. Corrected a stale dice-description assertion without changing the dice distribution. One existing Starlette/httpx deprecation warning remains.
+  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
+
+
+Historical P1 implementation was validated with fake-model and ASGI regression tests.
+The 2026-09-15 P2 work adds deployed llama.cpp measurements above; these do not establish
+general long-session coherence or OpenAI performance.
 
 - [x] ~~P1 - Enforce complete token budgets on every call~~ (2026-09-14) - logic/llm_manager.py:\_request, \_compact_if_needed, \_bounded_messages, \_count_tokens; core/config.py.
   - The reserved 2,048 tokens (or quarter-context) are never passed as an output cap. Schema/chat-template overhead is absent, cl100k_base can mismatch the local model, and len/4 can underestimate input. Summary requests bypass bounding.

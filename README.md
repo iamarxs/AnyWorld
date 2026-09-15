@@ -118,8 +118,8 @@ unsupervised.
 
 **Security note:** The game generates a self-signed, short-lived TLS certificate so connections can
 use encrypted HTTPS connections. api/tls*bootstrap.py takes automatically care of generating these
-certificates when they need to be renewed. \*\*\_This will cause web browsers to warn users that their
-connection may be insecure as they connect to the host's IP.
+certificates when they need to be renewed. \*\*\_This will cause web browsers to warn users that
+their connection may be insecure as they connect to the host's IP.
 However, browsers allow users to ignore this warning and continue to the app anyway.*\*\*
 
 Development reload is available with `python app.py --reload`.
@@ -131,7 +131,8 @@ Inspired by the game **AI Dungeon**, especially its earlier, free web-based inca
 
 ## AI Credits
 
-Qwen 3.8 27b and OpenAI's Luna and Astra models assisted in the production of this app.
+Alibaba Cloud's Qwen 3.8 27b and OpenAI's GPT-5.6 Luna and GPT-6 Astra models
+assisted in the production of this app.
 
 ## Quality checks
 
