@@ -175,3 +175,21 @@ def test_rejected_summary_audit_preserves_original_context():
         assert manager.game_usage.attempts == 2
 
     asyncio.run(run())
+
+
+def test_redundant_labels_are_removed_before_remembering_outcomes():
+    """Do not feed generated label duplication back into subsequent rounds."""
+
+    async def run():
+        client = FakeClient(
+            RoundResolution(
+                global_narrative="A journal is on the table.",
+                player_resolutions={"Arxs": "Arxs: [Arxs] arxs finds a journal."},
+            )
+        )
+        manager = LLMContextManager(client)
+        result = await manager.generate_resolution({"Arxs": "Look around"}, {})
+        assert result.player_resolutions == {"Arxs": "Arxs finds a journal."}
+        assert json.loads(manager.history[-1]["content"]) == result.model_dump()
+
+    asyncio.run(run())

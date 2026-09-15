@@ -1,5 +1,7 @@
 # Anyworld
 
+![Anyworld banner](static/media/AnyworldBanner.jpg)
+
 A tabletop adventure where you never have to roll dice or keep score — just write what your
 character does. One player (the host) describes the scenario, then everyone takes turns acting in
 their own words while an AI weaves every choice into a story that keeps unfolding.

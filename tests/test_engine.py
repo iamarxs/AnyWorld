@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 
 from core.config import settings
-from core.schemas import ClientPayload, RoundResolution, ServerEvent
+from core.schemas import ClientPayload, DicePlan, RoundResolution, ServerEvent
 from logic.engine import GameEngine, GameState, IDLE_ACTION
 from logic.transcript import GameTranscript
 
@@ -258,5 +258,45 @@ def test_chat_remains_available_outside_turns(tmp_path: Path) -> None:
 
         chat_event = sender.events_of_type("chat_echo")[-1]
         assert chat_event.payload == {"name": "Player", "chat": "Ready!"}
+
+    asyncio.run(run())
+
+
+def test_round_without_checks_never_rolls_and_emits_clean_outcomes(tmp_path, monkeypatch):
+    """A no-check plan completes without dice or duplicate labels in public outputs."""
+
+    async def run():
+        engine, sender, resolver = await build_started_game(tmp_path)
+
+        async def plan_dice(actions, current_state):
+            return DicePlan(rolls={name: False for name in actions}, hidden_rolls=[])
+
+        async def resolve(actions, dice, hidden_rolls):
+            assert dice == {}
+            assert hidden_rolls == set()
+            return RoundResolution(
+                global_narrative="A journal is on the table.",
+                player_resolutions={name: f"{name}: {name}: Sees a journal." for name in actions},
+            )
+
+        def unexpected_roll():
+            raise AssertionError("No check should consume a dice roll")
+
+        monkeypatch.setattr(resolver, "plan_dice", plan_dice, raising=False)
+        monkeypatch.setattr(resolver, "generate_resolution", resolve)
+        monkeypatch.setattr("logic.engine.roll_d100", unexpected_roll)
+        await engine.process_payload("host", payload("action", action="Look around"))
+        await engine.process_payload("player", payload("action", action="Look for useful items"))
+        await engine.wait_for_inference()
+        update = sender.events_of_type("state_update")[-1].payload
+        assert update["dice_results"] == {}
+        assert update["player_resolutions"] == {
+            "Host": "Sees a journal.",
+            "Player": "Sees a journal.",
+        }
+        assert engine.round_counter == 1
+        transcript = engine.transcript.path.read_text(encoding="utf-8")
+        assert "<dt>Host</dt><dd>Sees a journal.</dd>" in transcript
+        assert "Dice rolls" not in transcript
 
     asyncio.run(run())
