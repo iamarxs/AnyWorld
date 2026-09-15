@@ -88,7 +88,8 @@ function send(eventType, data) {
 
 function trimContainer(container, maximum) {
     while (container.children.length > maximum) {
-        const removed = container.firstElementChild;
+        const removed = container.firstElementChild?.id === "game-banner"
+            ? container.firstElementChild.nextElementSibling : container.firstElementChild;
         if (removed && removed.dataset.actionKey) {
             renderedActions.delete(removed.dataset.actionKey);
         }
@@ -199,7 +200,7 @@ function appendScenario(scenario) {
     narrative.className = "state-narrative";
     narrative.textContent = scenario;
     entry.append(label, narrative);
-    elements.log.prepend(entry);
+    document.getElementById("game-banner").after(entry);
 }
 
 function appendState(text, roundNumber = null) {
@@ -269,7 +270,7 @@ function applySnapshot(payload) {
     if (payload.scenario_title) {
         elements.title.textContent = displayGameTitle(payload.scenario_title);
     }
-    if (elements.log.children.length === 0) {
+    if (!elements.log.querySelector(":scope > :not(#game-banner)")) {
         appendScenario(payload.original_scenario);
         if (payload.round_number && payload.scenario_state) {
             appendState(payload.scenario_state, payload.completed_round_number);

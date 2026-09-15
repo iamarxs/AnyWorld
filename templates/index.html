@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Anyworld</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=11">
+  <link rel="stylesheet" href="/static/css/style.css?v=12">
   <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
@@ -36,7 +36,10 @@
       <span id="player-identity" aria-label="Current player"></span>
     </header>
     <section id="log-pane" data-pane-title="Game State" aria-label="Game state: scenario state and player actions"
-      aria-live="polite"></section>
+      aria-live="polite">
+      <img id="game-banner" src="/static/media/AnyworldBanner.jpg" alt="Anyworld"
+        width="1376" height="322" fetchpriority="high">
+    </section>
     <form id="input-pane">
       <input type="text" id="action-input" maxlength="4000" disabled autocomplete="off"
         placeholder="Waiting for your turn..." aria-label="Your character action">
@@ -85,7 +88,7 @@
   <button id="end-game-button" type="button" hidden>End game</button>
   <button id="retry-round-button" type="button" hidden>Retry paused round</button>
   <div id="connection-status" role="status">Connecting...</div>
-  <script src="/static/js/app.js?v=usage-6"></script>
+  <script src="/static/js/app.js?v=banner-7"></script>
 </body>
 
 </html>

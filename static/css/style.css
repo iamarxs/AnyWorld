@@ -1,13 +1,13 @@
 :root {
-    --background: #0b1015;
-    --panel: #141b22;
-    --panel-raised: #19232d;
-    --text: #d8e0e7;
-    --muted: #82909d;
+    --background: #0b1212;
+    --panel: #141f20;
+    --panel-raised: #1c2b2b;
+    --text: #e0e9e5;
+    --muted: #9aaca8;
     --border: rgb(216 224 231 / 10%);
-    --accent: #68a9c9;
-    --accent-bright: #83c3df;
-    --action-accent: #b49acb;
+    --accent: #7bc9ab;
+    --accent-bright: #a3e6c9;
+    --action-accent: #ddb780;
     --error: #e47d7d;
     /* Bright colors are used by the active round; past rounds are dimmed below. */
     --player-0: #79c0ff;
@@ -32,7 +32,10 @@ body {
 body {
     background: var(--background);
     color: var(--text);
-    font-family: ui-monospace, "Cascadia Code", monospace;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color-scheme: dark;
 }
 [hidden] {
     display: none !important;
@@ -47,10 +50,13 @@ body {
         "chat input";
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
 }
 #chat-pane {
     grid-area: chat;
+    background: linear-gradient(180deg, #172322, #101919);
+    min-width: 0;
     display: flex;
     min-height: 0;
     flex-direction: column;
@@ -115,6 +121,9 @@ body {
 #title-pane {
     position: relative;
     grid-area: title;
+    min-width: 0;
+    background: var(--panel);
+    font-size: 0.8rem;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -157,25 +166,18 @@ body {
 #log-pane {
     position: relative;
     grid-area: log;
-    background: #0b0f14;
+    min-width: 0;
+    background: radial-gradient(ellipse at top, #162724, #0b1212 65%);
+    scrollbar-color: #3b5650 transparent;
 }
-#log-pane::before {
-    position: sticky;
-    z-index: 2;
-    top: -0.75rem;
+#game-banner {
     display: block;
-    margin: -0.75rem -0.75rem 0.8rem;
-    padding: 0.35rem 0.75rem;
-    border-bottom: 1px solid var(--border);
-    background: #161b22;
-    content: attr(data-pane-title);
-    font-size: 0.72rem;
-    font-weight: bold;
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-}
-#log-pane::before {
-    color: var(--action-accent);
+    width: 100%;
+    height: auto;
+    margin: 0 0 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 0.8rem;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
 }
 #input-pane {
     grid-area: input;
@@ -184,8 +186,8 @@ input,
 textarea,
 button {
     border: 1px solid var(--border);
-    border-radius: 0.4rem;
-    background: #090e13;
+    border-radius: 0.65rem;
+    background: #0c1717;
     color: inherit;
     font: inherit;
     transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease,
@@ -196,7 +198,7 @@ textarea:focus-visible,
 button:focus-visible {
     border-color: var(--accent-bright);
     outline: none;
-    box-shadow: 0 0 0 3px rgb(104 169 201 / 18%);
+    box-shadow: 0 0 0 3px rgb(123 201 171 / 18%);
 }
 input,
 textarea {
@@ -206,22 +208,22 @@ textarea {
 #chat-input {
     width: 100%;
     border: 0;
-    outline: none;
+    border-radius: 0;
 }
 #action-input:disabled {
-    background: #21262d;
+    background: #142020;
     color: var(--muted);
     cursor: not-allowed;
 }
 button {
     padding: 0.65rem 1rem;
-    border-color: rgb(104 169 201 / 55%);
-    background: #172630;
+    border-color: rgb(123 201 171 / 55%);
+    background: #203d34;
     cursor: pointer;
 }
 button:hover:not(:disabled) {
     border-color: var(--accent-bright);
-    background: #203542;
+    background: #2b5043;
     transform: translateY(-1px);
 }
 button:disabled {
@@ -235,17 +237,19 @@ button:disabled {
     display: grid;
     place-items: center;
     padding: 1rem;
-    background: rgb(1 4 9 / 88%);
+    background: radial-gradient(ellipse at top, rgb(34 66 52 / 90%), rgb(5 12 12 / 96%));
+    backdrop-filter: blur(12px);
 }
 .modal-card {
     display: grid;
     width: min(36rem, 100%);
     max-height: 90vh;
     gap: 0.75rem;
-    padding: 1.5rem;
+    padding: clamp(1.25rem, 4vw, 2.25rem);
+    box-shadow: 0 24px 80px rgb(0 0 0 / 40%);
     overflow-y: auto;
     border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border-radius: 1rem;
     background: var(--panel);
 }
 .modal-card h1,
@@ -273,10 +277,10 @@ button:disabled {
 }
 .state-entry {
     margin: 0 0 0.7rem;
-    padding: 0.65rem 0.75rem;
+    padding: 1rem 1.15rem;
     border-left: 3px solid var(--accent);
-    border-radius: 0.25rem;
-    background: rgb(22 27 34 / 55%);
+    border-radius: 0.65rem;
+    background: rgb(27 44 40 / 65%);
     color: var(--text);
 }
 .state-round-label {
@@ -326,7 +330,7 @@ button:disabled {
     margin: 0;
     padding: 0.8rem 1rem;
     border: 1px solid var(--border);
-    border-radius: 0.5rem;
+    border-radius: 1rem;
     background: var(--panel-raised);
     color: var(--accent-bright);
 }
@@ -354,7 +358,7 @@ button:disabled {
     right: 0.6rem;
     top: 5.5rem;
 }
-#log-pane > :not(.current-round):not(.latest-complete-round):not(.opening-entry) {
+#log-pane > :not(.current-round):not(.latest-complete-round):not(.opening-entry):not(#game-banner) {
     opacity: 0.48;
 }
 #log-pane > .current-round,
@@ -402,10 +406,6 @@ button:disabled {
     #log-pane {
         padding: 0.55rem 0.65rem;
     }
-    #log-pane::before {
-        top: -0.55rem;
-        margin: -0.55rem -0.65rem 0.55rem;
-    }
     #action-input {
         min-height: 100%;
         opacity: 1;
@@ -437,8 +437,37 @@ button:disabled {
     max-width: calc(100vw - 3rem);
     padding: 0.75rem;
     border: 1px solid var(--border);
-    border-radius: 0.4rem;
+    border-radius: 0.65rem;
     background: var(--background);
     white-space: pre-line;
     line-height: 1.5;
+}
+
+.modal-card h1 {
+    font-size: 2rem;
+    letter-spacing: -0.04em;
+    color: var(--accent-bright);
+}
+.modal-card p, .modal-card label {
+    color: var(--muted);
+    font-size: 0.875rem;
+}
+.modal-card .error { color: var(--error); }
+#scenario-step h2, #lobby-step h2 { margin-bottom: 0.75rem; }
+#lobby-step button { margin-top: 1rem; }
+.chat-entry {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+}
+#input-pane:focus-within, #chat-form:focus-within {
+    border-top-color: var(--accent);
+}
+#action-input, #chat-input { min-width: 0; }
+#connection-status { font-size: 0.65rem; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+    }
 }
