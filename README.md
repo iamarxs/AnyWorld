@@ -8,17 +8,27 @@ their own words while an AI weaves every choice into a story that keeps unfoldin
 
 ## Features
 
+- Local-first AI. [Llama.cpp](https://github.com/ggml-org/llama.cpp) was used during development
 - Password-protected host and player roles
 - Host-created, LLM-titled scenarios and a waiting lobby
-- Strict sequential turns with disconnected-player idle injection
-- Unblocked party/system chat
+- Actions collected in join order, then resolved together as one simultaneous round
+- Automatic idle actions for disconnected players when the round can progress
+- Party/system chat available during inference; party chat stays outside the LLM context
 - Bounded and automatically compacted LLM history with Pydantic-validated responses
 - Non-blocking, escaped HTML transcripts under `.logged_games/`
-- DM-selected d100 checks, token estimates, authenticated reconnection, and host retry/end controls
+- DM-selected d100 checks, token accounting, authenticated reconnection, and host retry/end controls
+- Responsive dark UI with a scrolling game banner, player roster, party chat, and game log
 
 ## Configure
 
-Edit `config.yaml` and replace both `null` password values with strong, unique passwords before launching the game. The application refuses to start while either password is unconfigured.
+Edit `config.yaml` in the project directory before launching. Set `host_password` and
+`player_password` to distinct, nonempty passwords; replace any existing example values as well.
+The application rejects missing or identical passwords, but does not enforce password strength.
+The `null` values below are placeholders, not usable credentials.
+
+The following is a configuration outline. Keep the full game instructions in the existing
+`system_prompt` when changing connection settings; the short example here is not a replacement
+for those instructions.
 
 ```yaml
 server:
@@ -35,13 +45,16 @@ llm:
   tokenizer_encoding: "cl100k_base"
   model_name: "local"
   system_prompt: >
-    Direct the game fluently and creatively.
+    Direct a coherent multiplayer RPG. Resolve actions simultaneously, preserve established
+    facts and exact player names, and reserve dice for meaningful risks. Keep private
+    guidance secret. Return only the requested structured object.
 ```
 
 Set `provider` to `compatible` for a local OpenAI-compatible backend (the default), or to
-`openai` to connect directly to OpenAI. For direct OpenAI use, set `api_key` to your OpenAI API
-key and set `model_name` to the OpenAI model you want to use; `endpoint` is ignored. For local
-backends, `endpoint` must support OpenAI-compatible structured chat completion parsing.
+`openai` to connect directly to OpenAI (OpenAI backend not tested!).
+For direct OpenAI use, set `api_key` to your OpenAI API key and set `model_name` to the OpenAI
+model you want to use; `endpoint` is ignored. For local backends, `endpoint` must support
+OpenAI-compatible structured chat completion parsing.
 `context_window_size` is an optional fallback value. When using a compatible backend, Anyworld
 still attempts to read the context size from the llama.cpp `/props` endpoint even when a value is
 configured. A successful discovery takes precedence; if discovery is unavailable, the configured
@@ -54,7 +67,8 @@ tiktoken encoding. Unknown models, mismatches, unavailable endpoints, or `null` 
 conservative UTF-8-byte estimate. Schema/framing allowances and a safety margin are added; counts
 are not advertised as exact. The token indicator's tooltip describes the counting method.
 
-Optional limits under `llm` (defaults shown) apply to every model call, including summaries:
+Optional limits under `llm` (defaults shown) bound model calls. Output caps are selected by
+request type; memory audits share the summary output cap:
 
 ```yaml
 initial_output_tokens: 1024
@@ -66,26 +80,54 @@ request_timeout_seconds: 120.0
 max_retries: 1
 ```
 
+Additional optional `llm` settings:
+
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| `enable_thinking` | `null` | Sends `chat_template_kwargs.enable_thinking` only to compatible backends when set. Support depends on the backend/template; the current `config.yaml` sets it to `false`. |
+| `planner_system_prompt` | `null` | Replaces the system prompt for dice planning only. Scenario, private guidance, memory, and recent history are still supplied. |
+| `compaction_target_fraction` | `0.75` | After compaction starts, aims to leave the upcoming request within this fraction of the context window. Allowed range: `0.5`–`1.0`. |
+| `history_round_limit` | `null` | Optionally requests earlier memory checkpoints after this many stored request/response pairs, including setup calls. Allowed range: `2`–`100`; this is not a hard history cap. |
+
 Choose caps that leave sufficient input capacity within the effective backend context, especially
 for large parties. Before a request exceeds its budget, older rounds are merged into separate
-durable memory. Failed or oversized summaries leave the original memory intact. Oversized actions
+durable memory, followed by a separate model audit of lasting facts. Empty, non-shrinking,
+oversized, or rejected summaries leave the original memory intact; old history is not simply
+discarded. A model audit reduces risk but cannot guarantee perfect recall. Oversized actions
 are rejected while retaining the player's turn. An inference or compaction failure pauses the round
 with its submitted actions and any existing dice preserved; the host can use **Retry paused round**
 or **End game**. Retrying uses the same dice. Chat stays available during inference.
+
+A normal round uses two generation requests: dice planning and narrative resolution. Compaction
+adds summary and audit requests; retries and backend token-counting requests add further work.
+The expandable token indicator shows estimated retained context and reported round/game usage,
+cache counters, errors, retries, and timing. Missing provider counters appear as unknown. Cached
+input still occupies context, and retained context is not the full size of the next request.
 
 Dice planning includes private guidance, durable facts and recent history so old injuries, obstacles
 and secret triggers remain relevant. Public output is instructed to reveal only observable consequences;
 direct guidance echoes and explicit hidden-roll disclosures are rejected. This guard is not a guarantee
 against every possible paraphrase of a secret.
 
+Planning instructions default to no roll for routine observations or searches. A concrete
+obstacle, opposition, or hazard can justify a check; atmosphere alone should not. These are
+model instructions, not a deterministic classifier, so decisions depend on the backend. Dice
+values are generated by the server from 0 through 100 inclusive. Exact repeated player-name
+labels are removed from outcomes before display and history storage; arbitrary spelling errors
+in generated prose are not automatically corrected.
+
 Pending sockets receive no game broadcasts. Optional `server` admission settings are
 `max_pending_connections: 32`, `auth_timeout_seconds: 30.0`, and `max_auth_attempts: 3`.
 Reconnects require a per-player token stored in the same browser tab's sessionStorage, in addition
 to the password. Keep that browser session to rejoin your character; clearing it loses the token.
+Reconnect snapshots restore current state and submitted actions, not the entire past log. The UI
+keeps at most 500 game-log elements (including the banner) and 300 chat entries. The banner is
+the first item in the game pane and scrolls with its contents.
 
 ## Install (Windows Git Bash)
 
-Python 3.11 or newer is required.
+Python 3.11 or newer is required. Run these commands from the repository root; use an
+installed Python version in place of `-3.11` if needed.
 
 ```bash
 py -3.11 -m venv venv
@@ -101,7 +143,10 @@ python -m pip install -e '.[dev]'
 
 ## Run
 
-Start the separately managed OpenAI-compatible LLM server, then run:
+For `provider: compatible`, start the separately managed LLM server first (llama.cpp is guaranteed
+to be compatible, but all OpenAI compatible backends should work. OpenAI or other internet based
+backends have not been tested yet). With `provider: openai`, no local LLM server is needed
+(untested for now). From the repository root, run:
 
 ```bash
 python app.py
@@ -109,22 +154,57 @@ python app.py
 anyworld
 ```
 
-If the host is accessing the game on a local machine, they should open `http://localhost:4141/`.
-The first user enters the host password, creates the scenario, and waits for players using the
-player password before starting the game.
+Open [https://127.0.0.1:4141/](https://127.0.0.1:4141/) on the server machine.
+The application serves HTTPS; an `http://` URL will not work with the normal launcher.
 
-Other players should connect using the IP of the host machine, either a LAN IP or a WAN IP, in
-which case a port forward should probably be configured in the host's router. It is recommended
-to remove the port forward after the game session, unless it is intended to leave the game running
-unsupervised.
+1. The first user signs in with the host password and creates a scenario, optionally adding
+   private DM guidance.
+2. After scenario generation, other players join using the player password. `max_players`
+   includes the host.
+3. The host starts the game, which generates introductions for the joined players.
+4. Players submit actions in join order. Once the round's actions are collected, the DM resolves
+   them together. Use party chat independently of action submission.
+5. The host can retry a paused round or end the game. HTML transcripts are written to
+   `.logged_games/YYYY-MM-DD-title[-suffix].html`; hidden dice and private guidance are excluded
+   from the transcript inputs.
 
-**Security note:** The game generates a self-signed, short-lived TLS certificate so connections can
-use encrypted HTTPS connections. api/tls*bootstrap.py takes automatically care of generating these
-certificates when they need to be renewed. \*\*\_This will cause web browsers to warn users that
-their connection may be insecure as they connect to the host's IP.
-However, browsers allow users to ignore this warning and continue to the app anyway.*\*\*
+Other players connect to `https://<server-IP>:4141/` using the server's LAN address, or its public
+address for internet play. Allow the configured TCP port through the firewall; internet play may
+also require router port forwarding. Remove temporary forwarding when the session ends.
 
-Development reload is available with `python app.py --reload`.
+### Recommended models
+
+The game was developed using **Gemma 4**-26B-A4B-it (Q4_K_M or similar quant) as the backend's model,
+with a context size of **128k**, which was determined to be sufficiently intelligent and creative
+to act as the DM for the game. Use the best quantization you can while preserving a long enough
+context for longer games. The game does intelligently compact the context when it reaches a certain
+fill ratio, but no less than 64k is recommended.
+
+### HTTPS certificates
+
+`api/tls_bootstrap.py` creates `certs/cert.pem` and `certs/key.pem`. It attempts public-IP
+discovery via external services, falling back to a local interface address. Certificates cover
+that detected IP and `127.0.0.1`, last 825 days, and are regenerated at startup when missing,
+within 30 days of expiry, or no longer covering the detected IP. They do not include the
+`localhost` hostname or every LAN address.
+
+Browsers will warn because the certificate is self-signed, and may also report an address
+mismatch when using another address. For a server you recognize and trust, use the browser's
+certificate exception if available, or deploy a trusted certificate/reverse proxy.
+
+### Server lifecycle
+
+One server process hosts one in-memory game. Multiple workers and concurrent independent games
+are not supported. Restarting loses the live session; the HTML transcript is a record, not a
+loadable save. After ending a game, restart the server to begin another.
+
+Restart after configuration changes. CLI overrides are available as `--host` and `--port`, for
+example `anyworld --host 0.0.0.0 --port 4141`. Development reload is available with
+`python app.py --reload`; code-triggered reloads also reset the in-memory game.
+
+## TODO
+
+- OpenAI backend has not been tested yet, functionality not guaranteed. llama.cpp was used for development.
 
 ## Credits
 
@@ -139,7 +219,10 @@ assisted in the production of this app.
 ## Quality checks
 
 ```bash
-black --check .
+black --check app.py api core logic tests
 flake8 app.py api core logic tests
 pytest
 ```
+
+Tests use isolated settings and fake model clients; they do not require a running LLM. They
+can create temporary transcripts and `.logged_games/`, so they are not strictly read-only checks.
