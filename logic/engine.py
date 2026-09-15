@@ -113,6 +113,7 @@ class GameEngine(LobbyMixin):
         finally:
             async with self.effects_lock:
                 if self._job_current(epoch):
+                    await self._publish_usage()
                     await self.sender.broadcast_global(
                         ServerEvent(type="dm_thinking", payload={"active": False})
                     )
@@ -334,6 +335,22 @@ class GameEngine(LobbyMixin):
             self._launch_round_locked(self.round_buffer.copy(), retry=True)
 
     async def _resolve_round(self, epoch: int) -> None:
+        """Measure all round work, including failed host attempts."""
+        begin_usage = getattr(self.resolver, "begin_round_usage", None)
+        if begin_usage is not None:
+            begin_usage(self.round_counter + 1)
+        error = None
+        try:
+            await self._resolve_round_work(epoch)
+        except BaseException as exc:
+            error = type(exc).__name__
+            raise
+        finally:
+            finish_usage = getattr(self.resolver, "finish_round_usage", None)
+            if finish_usage is not None:
+                finish_usage(error)
+
+    async def _resolve_round_work(self, epoch: int) -> None:
         """Run dice planning and resolution, then commit the round outcome."""
         pending = self.pending_resolution
         assert pending is not None
@@ -368,6 +385,12 @@ class GameEngine(LobbyMixin):
             resolution = await self.resolver.generate_resolution(
                 llm_actions, pending["dice"], hidden_rolls=pending["hidden"]
             )
+        if (
+            set(resolution.player_resolutions) != set(llm_actions)
+            or not resolution.global_narrative.strip()
+            or any(not text.strip() for text in resolution.player_resolutions.values())
+        ):
+            raise LLMResolutionError("Invalid resolution participants or empty narrative.")
         public_dice = {
             name: value for name, value in pending["dice"].items() if name not in pending["hidden"]
         }
@@ -437,12 +460,14 @@ class GameEngine(LobbyMixin):
         tokens = getattr(self.resolver, "last_token_usage", None)
         if tokens is None:
             return
+        snapshot = getattr(self.resolver, "usage_snapshot", None)
         event = ServerEvent(
             type="token_usage",
             payload={
                 "approximate_tokens": tokens,
                 "context_window_size": getattr(self.resolver, "context_window_size", 8_192),
                 "counting_method": getattr(self.resolver, "token_count_method", "estimate"),
+                **(snapshot() if snapshot is not None else {}),
             },
         )
         if client_id is None:
