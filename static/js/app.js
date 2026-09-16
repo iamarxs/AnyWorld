@@ -243,30 +243,35 @@ function displayGameTitle(title) {
     return title ? `Anyworld - ${title}` : "Anyworld";
 }
 
-function appendScenario(scenario) {
-    if (!scenario) {
+function appendScenario(scenario, original = false) {
+    const scenarioClass = original ? "original-scenario" : "opening-scenario";
+    if (!scenario || elements.log.querySelector(`.${scenarioClass}`)) {
         return;
     }
     const entry = document.createElement("article");
-    entry.className = "state-entry opening-entry original-scenario";
+    entry.className = `state-entry opening-entry ${scenarioClass}`;
     const label = document.createElement("strong");
     label.className = "state-round-label";
-    label.textContent = "Opening scenario";
+    label.textContent = original ? "Host-typed scenario prompt" : "Opening scenario";
     const narrative = document.createElement("p");
     narrative.className = "state-narrative";
     narrative.textContent = scenario;
     entry.append(label, narrative);
-    document.getElementById("game-banner").after(entry);
+    const anchor = (!original && elements.log.querySelector(".original-scenario"))
+        || document.getElementById("game-banner");
+    anchor.after(entry);
+    trimContainer(elements.log, MAX_LOG_ENTRIES);
 }
 
 function appendState(text, roundNumber = null) {
     const entry = document.createElement("article");
     entry.className = "state-entry";
     entry.classList.add(roundNumber === null ? "opening-entry" : "current-round");
+    if (roundNumber === null) entry.classList.add("opening-scenario");
 
     const label = document.createElement("strong");
     label.className = "state-round-label";
-    label.textContent = roundNumber ? `Round ${roundNumber} result` : "Opening state";
+    label.textContent = roundNumber ? `Round ${roundNumber} result` : "Opening scenario";
 
     const narrative = document.createElement("p");
     narrative.className = "state-narrative";
@@ -327,9 +332,11 @@ function applySnapshot(payload) {
     if (payload.scenario_title) {
         elements.title.textContent = displayGameTitle(payload.scenario_title);
     }
-    if (!elements.log.querySelector(":scope > :not(#game-banner)")) {
-        appendScenario(payload.original_scenario);
-        if (payload.round_number && payload.scenario_state) {
+    const emptyLog = !elements.log.querySelector(":scope > :not(#game-banner)");
+    appendScenario(payload.original_scenario, true);
+    appendScenario(payload.opening_scenario);
+    if (emptyLog) {
+        if (payload.completed_round_number && payload.scenario_state) {
             appendState(payload.scenario_state, payload.completed_round_number);
         }
     }
@@ -382,9 +389,6 @@ function handleMessage(message) {
         setPlayerOrder(payload.player_order);
         if (payload.round_title) {
             elements.title.textContent = displayGameTitle(payload.round_title);
-        }
-        if (payload.original_scenario && !elements.log.querySelector(".original-scenario")) {
-            appendScenario(payload.original_scenario);
         }
         startRound(payload.round_number);
         syncActions(payload.round_number, payload.submitted_actions);
@@ -447,7 +451,8 @@ function handleMessage(message) {
         const game = payload.game || {};
         elements.tokenCount.textContent = `≈ ${used.toLocaleString()} / ${limit.toLocaleString()}`;
         document.getElementById("token-details").textContent = [
-            "Retained context is estimated; next input, schema and output are excluded.",
+            payload.counting_method || "Retained context is estimated; next input, schema and output are excluded.",
+            `Context limit source: ${payload.context_window_source || "configured"}`,
             `Round tokens: ${formatTotal(round.total_tokens)} (input ${formatTotal(round.input_tokens)}, output ${formatTotal(round.completion_tokens)})`,
             `Game tokens: ${formatTotal(game.total_tokens)}`,
             `Round cache reads: ${formatTotal(round.cached_tokens)}`,
@@ -465,6 +470,7 @@ function handleMessage(message) {
         elements.retryRoundButton.hidden = true;
         appendText(elements.chatMessages, `System: ${payload.msg}`, "chat-entry", MAX_CHAT_ENTRIES);
     } else if (type === "scenario_ready") {
+        appendScenario(payload.original_scenario, true);
         elements.hostModal.hidden = false;
         elements.endGameButton.hidden = true;
         elements.title.textContent = payload.title;

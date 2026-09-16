@@ -1,12 +1,15 @@
 """Non-blocking, readable HTML game transcript persistence."""
 
 import asyncio
+import logging
 from datetime import datetime
 from html import escape
 from pathlib import Path
 import re
 
 from core.schemas import RoundResolution
+
+LOGGER = logging.getLogger(__name__)
 
 
 class GameTranscript:
@@ -32,7 +35,7 @@ class GameTranscript:
             self.path = self.log_dir / f"{stem}-{suffix}.html"
             suffix += 1
         scenario_html = (
-            f'<h2>Opening scenario</h2>\n<p class="state">{escape(opening_scenario)}</p>\n'
+            f'<h2>Original scenario prompt</h2>\n<p class="state">{escape(opening_scenario)}</p>\n'
             if opening_scenario
             else ""
         )
@@ -44,22 +47,36 @@ class GameTranscript:
         document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>{escape(title)} — Anyworld</title><style>
-body{{max-width:60rem;margin:2rem auto;padding:0 1rem;background:#0b1015;color:#d8e0e7;
-font:16px/1.6 system-ui,sans-serif}}article{{margin:1.5rem 0;padding:1rem;border:1px solid #33404c;
-border-radius:.5rem;background:#141b22}}h1,h2,h3{{color:#83c3df}}dt{{font-weight:700;color:#b49acb}}
-dd{{margin:0 0 .8rem;white-space:pre-wrap}}
-.state{{white-space:pre-wrap;color:#b8c4ce}}
-.dice-rolls{{padding:.6rem;background:#1c2a3a;border:1px solid #4a5c6e;
-border-radius:.4rem;margin:.8rem 0}}
+*{{box-sizing:border-box}}
+:root{{color-scheme:dark;--background:#0b1212;--panel:#141f20;--text:#e0e9e5;
+--muted:#9aaca8;--border:rgb(216 224 231 / 10%);--accent:#7bc9ab;--action-accent:#ddb780}}
+body{{max-width:60rem;margin:2rem auto;padding:0 1rem;background:var(--background);
+color:var(--text);font:15px/1.6 "Segoe UI",system-ui,sans-serif;overflow-wrap:anywhere;
+background-image:radial-gradient(ellipse at top,#162724,var(--background) 65%)}}
+header,article{{margin:1.5rem 0;padding:clamp(1rem,3vw,2rem);border:1px solid var(--border);
+border-radius:1rem;background:var(--panel);box-shadow:0 12px 40px rgb(0 0 0 / 15%)}}
+h1{{margin:0 0 1.5rem;color:#a3e6c9;font-size:clamp(1.4rem,4vw,2rem)}}
+h2{{color:var(--accent);font-size:1.05rem;margin:1.5rem 0 .75rem}}
+article>h2{{margin-top:0;padding-bottom:.35rem;border-bottom:1px solid var(--action-accent);
+color:var(--action-accent)}}
+h3{{color:var(--muted);font-size:.85rem;letter-spacing:.04em}}
+dt{{font-weight:600}}dd{{margin:0 0 .8rem;white-space:pre-wrap}}
+.state{{white-space:pre-wrap;padding:1rem 1.15rem;border-left:3px solid var(--accent);
+border-radius:.65rem;background:rgb(27 44 40 / 65%);color:var(--text)}}
+.dice-rolls{{padding:.6rem 1rem;background:#1c2b2b;border:1px solid var(--border);
+border-radius:.65rem;margin:.8rem 0}}
+footer{{color:var(--muted);text-align:center;padding:1rem}}
+@media(max-width:700px){{body{{margin:1rem auto;padding:0 .65rem}}}}
 dl dt:nth-of-type(8n+1){{color:#79c0ff}}dl dt:nth-of-type(8n+2){{color:#ffa657}}
 dl dt:nth-of-type(8n+3){{color:#56d364}}dl dt:nth-of-type(8n+4){{color:#ff7b72}}
 dl dt:nth-of-type(8n+5){{color:#d2a8ff}}dl dt:nth-of-type(8n+6){{color:#f2cc60}}
 dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
 </style></head><body><header><h1>Anyworld - {escape(title)}</h1>
-{scenario_html}{guidance_html}<h2>Opening state</h2>
+{scenario_html}{guidance_html}<h2>Opening scenario</h2>
 <p class="state">{escape(initial_state)}</p></header><main>
 """
         await self._write(document)
+        LOGGER.info("Transcript started")
 
     async def append_round(
         self,
@@ -94,6 +111,7 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
 <p class="state">{escape(resolution.global_narrative)}</p></article>
 """
         await self._write(section)
+        LOGGER.info("Transcript round appended round=%d", number)
 
     @staticmethod
     def _render_dice_section(dice_results: dict[str, int] | None, title: str = "Dice rolls") -> str:
@@ -119,6 +137,7 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
             return
         ending = f"</main><footer><p>{escape(reason)}</p></footer></body></html>\n"
         await self._write(ending, final=True)
+        LOGGER.info("Transcript finalized")
 
     async def _write(self, text: str, *, final: bool = False) -> None:
         """Serialize and append text, waiting out in-flight writes on cancel."""
