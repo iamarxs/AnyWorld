@@ -188,6 +188,7 @@ class LobbyMixin:
                 if not self._job_current(epoch):
                     return
                 self.original_scenario = scenario
+                self.private_guidance = guidance
                 self.scenario_title = resolution.round_title or "Untitled Session"
                 self.current_scenario_state = resolution.global_narrative
                 self.state = GameState.AWAITING_PLAYERS
@@ -221,7 +222,10 @@ class LobbyMixin:
                 if not self._job_current(epoch):
                     return
             await self.transcript.start(
-                self.scenario_title or "Untitled Session", resolution.global_narrative
+                self.scenario_title or "Untitled Session",
+                resolution.global_narrative,
+                opening_scenario=self.original_scenario,
+                private_guidance=self.private_guidance,
             )
             async with self.lock:
                 if not self._job_current(epoch):

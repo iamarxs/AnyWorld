@@ -52,6 +52,7 @@ class GameEngine(LobbyMixin):
         self.round_counter = 0
         self.scenario_title: str | None = None
         self.original_scenario: str | None = None
+        self.private_guidance = ""
         self.current_scenario_state: str | None = None
         self.transcript = GameTranscript()
 
@@ -441,6 +442,11 @@ class GameEngine(LobbyMixin):
                     player_colors={
                         self.players[item].name: self.players[item].join_index
                         for item in participants
+                    },
+                    hidden_dice_results={
+                        name: value
+                        for name, value in pending["dice"].items()
+                        if name in pending["hidden"]
                     },
                 )
             except OSError:

@@ -20,8 +20,10 @@ class GameTranscript:
         self._finalized = False
         self._io_lock = asyncio.Lock()
 
-    async def start(self, title: str, initial_state: str) -> None:
-        """Create the transcript file and write the opening state."""
+    async def start(
+        self, title: str, initial_state: str, opening_scenario: str = "", private_guidance: str = ""
+    ) -> None:
+        """Archive the host scenario and private guidance before the opening state."""
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")
         stem = f"{datetime.now():%Y-%m-%d}-{safe_title or 'session'}"
         self.path = self.log_dir / f"{stem}.html"
@@ -29,6 +31,16 @@ class GameTranscript:
         while self.path.exists():
             self.path = self.log_dir / f"{stem}-{suffix}.html"
             suffix += 1
+        scenario_html = (
+            f'<h2>Opening scenario</h2>\n<p class="state">{escape(opening_scenario)}</p>\n'
+            if opening_scenario
+            else ""
+        )
+        guidance_html = (
+            "<h2>Private DM guidance</h2>\n" f'<p class="state">{escape(private_guidance)}</p>\n'
+            if private_guidance
+            else ""
+        )
         document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>{escape(title)} — Anyworld</title><style>
@@ -43,7 +55,8 @@ dl dt:nth-of-type(8n+1){{color:#79c0ff}}dl dt:nth-of-type(8n+2){{color:#ffa657}}
 dl dt:nth-of-type(8n+3){{color:#56d364}}dl dt:nth-of-type(8n+4){{color:#ff7b72}}
 dl dt:nth-of-type(8n+5){{color:#d2a8ff}}dl dt:nth-of-type(8n+6){{color:#f2cc60}}
 dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
-</style></head><body><header><h1>Anyworld - {escape(title)}</h1><h2>Opening state</h2>
+</style></head><body><header><h1>Anyworld - {escape(title)}</h1>
+{scenario_html}{guidance_html}<h2>Opening state</h2>
 <p class="state">{escape(initial_state)}</p></header><main>
 """
         await self._write(document)
@@ -55,6 +68,7 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
         resolution: RoundResolution,
         dice_results: dict[str, int] | None = None,
         player_colors: dict[str, int] | None = None,
+        hidden_dice_results: dict[str, int] | None = None,
     ) -> None:
         """Append a resolved round's actions, dice and results."""
         player_colors = player_colors or {}
@@ -69,17 +83,21 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
             for name, result in resolution.player_resolutions.items()
         )
         dice_section = self._render_dice_section(dice_results)
+        private_section = self._render_dice_section(
+            hidden_dice_results, title="Private checks from DM guidance"
+        )
         section = f"""<article><h2>Round {number}</h2>
 <h3>Player actions</h3><dl>{actions_html}</dl>
 {dice_section}
+{private_section}
 <h3>Results</h3><dl>{results_html}</dl><h3>Resulting state</h3>
 <p class="state">{escape(resolution.global_narrative)}</p></article>
 """
         await self._write(section)
 
     @staticmethod
-    def _render_dice_section(dice_results: dict[str, int] | None) -> str:
-        """Render public dice results, or nothing when no rolls occurred."""
+    def _render_dice_section(dice_results: dict[str, int] | None, title: str = "Dice rolls") -> str:
+        """Render labeled public or private checks, omitting empty sections."""
         if not dice_results:
             return ""
 
@@ -90,7 +108,10 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
             description = describe_roll(value)
             label = f"{name}: {value}/100 ({description})"
             roll_items.append(f"<dt>{escape(label)}</dt><dd></dd>")
-        return '<div class="dice-rolls"><h3>Dice rolls</h3>' f"<dl>{''.join(roll_items)}</dl></div>"
+        return (
+            f'<div class="dice-rolls"><h3>{escape(title)}</h3>'
+            f"<dl>{''.join(roll_items)}</dl></div>"
+        )
 
     async def finalize(self, reason: str = "The host ended the game.") -> None:
         """Close the transcript document and mark it finalized."""
