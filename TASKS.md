@@ -5,6 +5,17 @@ only; venv and .venv were excluded. No tests, app startup or live inference were
 P1 = correctness/security or substantial waste; P2 = optimization/reliability; P3 = optional.
 Active items are recommendations, not implementation already authorized or underway.
 
+Current review policy: offline tests may run in read-only reviews when temporary files are
+acceptable. Per-test working directories and their artifacts are deleted on teardown, including
+after failures; forced termination can prevent cleanup. Use `python -B -m pytest -p no:cacheprovider`
+with `PYTHONDONTWRITEBYTECODE=1` to avoid bytecode/cache artifacts, including in child processes.
+In-process ASGI tests are allowed; live server startup and backend benchmarks remain outside this
+workflow. The no-tests statement above records the historical review, not a current restriction.
+
+Historical benchmark observations below came from local runs. Their reports and runner files
+are not part of the published repository; these observations are not reproducible evidence
+provided by this checkout and do not establish general performance guarantees.
+
 ## Active
 
 - [ ] **P2 - Tune OpenAI caching only for supported model/API capabilities** - core/config.py; logic/llm_manager.py.
@@ -15,24 +26,24 @@ Active items are recommendations, not implementation already authorized or under
   - Maintain authoritative players, world, NPCs, resources and unresolved threads, applying validated changes from the existing resolution where feasible. Keep rich prose in transcripts/UI instead of retransmitting it indefinitely.
   - Separate immutable premise from changing facts; replace superseded facts and retrieve archived details when relevant. Freeze checkpoints between compactions when practical to preserve prefix reuse. Avoid adding mandatory summarization every round.
   - Acceptance: long-session comparison against current history uses fewer total tokens without regressions in identity, possessions, injuries, causal consistency or unresolved quests.
-  - Experiment (2026-09-15): periodic checkpoints reduced tokens in a synthetic replay but lost a consumed item and changed a deadline. Kept disabled; a new summary audit rejected a faulty live summary and preserved history. A lossless compact ledger remains unfinished. See [report](benchmarks/2026-09-15/REPORT.md).
+  - Experiment (2026-09-15): periodic checkpoints reduced tokens in a synthetic replay but lost a consumed item and changed a deadline. Kept disabled; a new summary audit rejected a faulty live summary and preserved history. A lossless compact ledger remains unfinished.
 
 - [ ] **P2 - Reduce planner and output tokens without degrading adjudication** - logic/llm_manager.py:plan_dice, generate_resolution; core/schemas.py; config.yaml.
-  - Planner currently receives the full narrative system prompt. Trial a concise planner prompt with necessary facts, bounded short outcomes and nonduplicative public state; avoid generating new titles the engine discards.
+  - Planner receives the narrative system prompt by default; `planner_system_prompt` can override it. Evaluate a concise planner prompt with necessary facts, bounded short outcomes and nonduplicative public state; avoid generating new titles the engine discards.
   - Compare two-call behavior against safe deterministic handling of routine actions. A one-call experiment could supply server-generated candidate rolls and let the model select checks, but must evaluate selection bias; never let the LLM invent authoritative rolls.
   - Acceptance: compare total tokens, latency and coherent/fair outcomes. A routine-looking action must still account for contextual hazards.
-  - Experiment (2026-09-15): shorter prompts did not consistently lower total cost and a candidate missed hidden-roll classification. Full planner remains default. Configured Gemma thinking is disabled to reserve bounded output for structured answers. Safe-action overrolling remains a live-model limitation; no one-call or deterministic bypass was adopted. See [report](benchmarks/2026-09-15/REPORT.md).
+  - Experiment (2026-09-15): shorter prompts did not consistently lower total cost and a candidate missed hidden-roll classification. Full planner remains default. Configured Gemma thinking is disabled to reserve bounded output for structured answers. Safe-action overrolling remains a live-model limitation; no one-call or deterministic bypass was adopted.
 
-- [ ] **P2 - Bound slow-socket backpressure** - api/server.py:ConnectionManager.\_send, broadcast_global.
-  - gather waits for every socket with no deadline. Failed sends only log and do not mark the player disconnected.
-  - Serialize an event once, use ordered bounded per-socket delivery and timeout/disconnect handling. Acceptance: stalled receivers cannot block healthy clients or remain active turn participants indefinitely.
+- [ ] **P2 - Bound slow-socket backpressure** - api/server.py:ConnectionManager._send_text, broadcast_global.
+  - Broadcasts already serialize once; per-socket send locks and a five-second timeout close failing sockets (close timeout: two seconds). Broadcasts still await all sends.
+  - Verify slow-client isolation and prompt player-disconnect handling under load; consider bounded delivery queues if needed. Acceptance: stalled receivers cannot hold up healthy clients or remain active turn participants indefinitely.
 
 - [ ] **P2 - Recover missed rounds and preserve access to full history** - static/js/app.js:applySnapshot, trimContainer; logic/lobby.py:\_snapshot_locked.
   - Existing DOM prevents snapshot state replacement after disconnect. Reload only receives current state; the 500-entry cap deletes early history without a retrieval path.
   - Add public event sequence/cursor replay and paginated/virtualized history. Acceptance: reconnect restores missed events once and users can reach the opening without unbounded DOM growth or private-memory exposure.
 
-- [ ] **P2 - Correct runtime documentation and verify dependency bounds** - README.md; pyproject.toml; api/tls_bootstrap.py.
-  - P1 follow-up corrected counting/privacy/reconnect documentation and usage audience. Remaining: HTTP launch URL versus HTTPS, certificate lifetime wording and localhost SAN coverage.
+- [ ] **P2 - Verify dependency bounds and clean installation** - INSTALL.md; pyproject.toml; api/tls_bootstrap.py.
+  - Runtime documentation now covers HTTPS, certificate lifetime and address coverage, private transcript contents, reconnects, and context counting. Minimum-version compatibility still needs verification.
   - Verify minimum dependencies support APIs used, including beta.chat.completions.parse; constrain a tested set. Acceptance: clean installation/documented startup works and counting limitations are explicit.
 
 ## Waiting On
@@ -43,33 +54,38 @@ Active items are recommendations, not implementation already authorized or under
 
 - [ ] **P3 - Support multiple sessions and host reset** - Isolate engines, resolvers, credentials, transcripts and cancellation before adding workers/reset. Retains earlier repository backlog intent.
 - [ ] **P3 - Evaluate multilingual play** - Retains earlier translation backlog intent; assess coherence and token budgets rather than assuming a model class is required.
-- [ ] **P3 - Improve transcript resilience and colors** - logic/transcript.py ignores player_colors; positional CSS changes colors when participants are omitted. Use stable colors, bounded filenames, exclusive creation and ordered writes/finalization; test retry after write failure. The unused previous_state transcript parameter and its call arguments have been removed.
+- [ ] **P3 - Improve transcript resilience and colors** - logic/transcript.py ignores player_colors; positional CSS changes colors when participants are omitted. Writes/finalization are already serialized and the palette now matches the game. Add stable player colors, bounded filenames, and exclusive creation; test retry after write failure. The unused previous_state transcript parameter and its call arguments have been removed.
 - [ ] **P3 - Version static assets reproducibly** - Replace manual ?v= values with content/build hashes and suitable cache headers so unchanged assets stay cached and edits invalidate reliably.
 
 ## Done
 
+- [x] ~~Separate title preparation from the generated opening~~ (2026-09-17)
+  - Scenario submission generates only a title. Joining players see the host-typed prompt; Start Game generates the opening with all joined names. The prompt requests setting, goal, roles, paragraphs, and consistent physical consequences. These instructions do not guarantee model coherence.
+- [x] ~~Update transcript appearance and distinguish scenario versions~~ (2026-09-17)
+  - Transcripts match the game's green palette and retain both Original scenario prompt and Opening scenario. Private guidance and hidden checks are archived for the server operator, not broadcast to players.
+- [x] ~~Correct retained-context display and add operational logging~~ (2026-09-17)
+  - Retained context uses backend tokenization when available, with labelled fallback estimates and limit source. Logs cover compaction, inference lifecycle, retries, and private-guidance dice checks.
+- [x] ~~Clean up test artifacts and refresh the documentation~~ (2026-09-17)
+  - Per-test temporary directories are deleted on teardown, including after failures. Read-only reviews may run offline tests when temporary files are allowed. README is simplified; INSTALL.md holds setup and diagnostics. Latest code validation: 157 Python and 15 JavaScript tests passed; formatting/lint checks passed, with an existing Starlette/httpx deprecation warning.
+
 - [x] ~~P2 - Instrument total round cost and cache reuse before tuning~~ (2026-09-15)
   - Per-attempt, round and game totals now include summaries/audits, retries, failures, cancellations, unknown counters and work time. The expandable usage panel separates retained context from consumption. Final deployed llama.cpp matrix: 8/8 successful cases, 2/6 players, short/long actions, cold first calls and warm repeats after 20 seconds of artificial idle. Compaction accounting is also covered offline and by a live summary/audit pair.
-  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
 
 - [x] ~~P2 - Benchmark llama.cpp cache interference and stable prefixes~~ (2026-09-15)
   - Measured processed/reused prompt counters and latency on the deployed one-slot server, including explicit slot 0. No routing change was justified; separate auxiliary capacity remains unmeasured. Preserve original validated assistant text when normalization makes no change, avoiding unnecessary token-prefix changes. Cold first calls use cache_prompt=false because cache erase returned HTTP 501.
-  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
 
 - [x] ~~P2 - Cache message token counts and tune compaction cadence~~ (2026-09-15)
   - Added bounded content/tokenizer and request/template/schema count caches; failed tokenizer fallbacks remain retryable. Necessary compaction targets a lower watermark with transactional validation and audit. Optional periodic checkpoints remain disabled after live retention failures. Repeated live request counts agreed (1354 tokens); counting took 4.23 ms initially and 0.31 ms cached. No general percentage saving is claimed.
-  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
 
 - [x] ~~P2 - Validate semantics before remembering or committing LLM output~~ (2026-09-15)
   - Exact participant schemas and semantic checks reject missing/extra names, empty required content and invalid hidden-roll membership before memory/state commit. Bounded repair retains authoritative actions and dice; failed rounds pause. Normalize displayed/remembered outcomes consistently. Summary auditing rejects detected durable-fact loss transactionally; model-assisted validation cannot prove arbitrary semantic correctness.
-  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
 
 - [x] ~~P2 - Fix stale tests and cover context/cache/lifecycle behavior~~ (2026-09-15)
-  - 88 offline tests pass, with fake clients and isolated settings/transcripts. Added semantic, accounting, cache, template-option and discovery-recovery regressions plus separate opt-in live runners. Black, Flake8 and JavaScript syntax checks pass. Corrected a stale dice-description assertion without changing the dice distribution. One existing Starlette/httpx deprecation warning remains.
-  - Evidence and limitations: [deployed backend report](benchmarks/2026-09-15/REPORT.md).
+  - At that milestone, 88 offline tests passed, with fake clients and isolated settings/transcripts. Added semantic, accounting, cache, template-option and discovery-recovery regressions plus separate opt-in live runners. Black, Flake8 and JavaScript syntax checks pass. Corrected a stale dice-description assertion without changing the dice distribution. One existing Starlette/httpx deprecation warning remains.
 
 
-Historical P1 implementation was validated with fake-model and ASGI regression tests.
+The older completed items below preserve the original problem statements; their Implementation
+lines describe the fixes. Historical P1 implementation was validated with fake-model and ASGI regression tests.
 The 2026-09-15 P2 work adds deployed llama.cpp measurements above; these do not establish
 general long-session coherence or OpenAI performance.
 
@@ -89,7 +105,7 @@ general long-session coherence or OpenAI performance.
   - Planning asks which rolls originate from private guidance but excludes that guidance. It only sees the latest paragraph, while the system prompt discourages repeating unchanged state; prior obstacles/capabilities can disappear.
   - Give the planner compact relevant facts/rules and private triggers, distinct from public narrative. Test that generated public prose does not disclose secret checks.
   - Acceptance: persistent injuries, locked doors and hidden hazards affect planning across quiet rounds and compaction; ordinary rolls remain public and private rolls remain private.
-  - Implementation: Planner now receives genesis/private rules, durable memory and recent facts. Hidden checks stay out of public dice/transcripts, and explicit output disclosures are rejected before history commit.
+  - Implementation: Planner now receives genesis/private rules, durable memory and recent facts. Hidden checks stay out of public dice broadcasts (current server-side transcripts include them), and explicit output disclosures are rejected before history commit.
 
 - [x] ~~P1 - Authenticate sockets before subscriptions or replacement~~ (2026-09-14) - api/server.py:connect, broadcast_global, websocket_endpoint; logic/lobby.py.
   - All accepted UUID sockets receive game/chat broadcasts before authentication. Browser filtering is not authorization. Reusing a UUID closes the old socket before credentials are checked; engine handlers identify callers by UUID rather than authenticated socket ownership.
