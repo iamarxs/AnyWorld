@@ -1,6 +1,7 @@
 """Atomic game state with owned, cancellable inference tasks."""
 
 import asyncio
+import json
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -54,6 +55,7 @@ class GameEngine(LobbyMixin):
         self.original_scenario: str | None = None
         self.private_guidance = ""
         self.current_scenario_state: str | None = None
+        self.opening_scenario: str | None = None
         self.transcript = GameTranscript()
 
     def _job_current(self, epoch: int) -> bool:
@@ -75,6 +77,7 @@ class GameEngine(LobbyMixin):
         self, work: Callable[[int], Awaitable[None]], epoch: int, failure_state: GameState
     ) -> None:
         """Run an owned inference job, handling failures and cleanup."""
+        LOGGER.info("Inference job started generation=%d phase=%s", epoch, failure_state.name)
         try:
             async with self.effects_lock:
                 if not self._job_current(epoch):
@@ -84,12 +87,19 @@ class GameEngine(LobbyMixin):
                 )
             async with asyncio.timeout(settings.llm.request_timeout_seconds * 3):
                 await work(epoch)
+            LOGGER.info(
+                "Inference job finished generation=%d current=%s state=%s",
+                epoch,
+                self._job_current(epoch),
+                self.state.name,
+            )
         except asyncio.CancelledError:
+            LOGGER.info("Inference job cancelled generation=%d", epoch)
             raise
         except Exception as exc:
             # Boundary for an owned task: consume failures so the session never
             # remains spinning forever. Do not expose provider bodies/private guidance.
-            LOGGER.warning("Inference job failed: %s", type(exc).__name__)
+            LOGGER.warning("Inference job failed generation=%d error=%s", epoch, type(exc).__name__)
             connection_hint = (
                 "Could not connect to the LLM backend. Check that the model server is running "
                 "and its configured endpoint is reachable before retrying. "
@@ -138,6 +148,7 @@ class GameEngine(LobbyMixin):
 
     async def shutdown(self, *, close_resolver: bool = True) -> None:
         """Terminate the session, cancel inference and finalize the transcript."""
+        LOGGER.info("Game shutdown requested close_resolver=%s", close_resolver)
         async with self.effects_lock:
             async with self.lock:
                 already_ended = self.state is GameState.ENDED
@@ -255,6 +266,7 @@ class GameEngine(LobbyMixin):
                 actions = self._take_complete_round_locked()
                 if actions is not None:
                     self._launch_round_locked(actions)
+            LOGGER.info("Player action accepted round=%d", action_event.payload["round_number"])
             await self.sender.broadcast_global(action_event)
             if directive is not None:
                 await self.sender.broadcast_global(directive)
@@ -343,6 +355,7 @@ class GameEngine(LobbyMixin):
             if self.inference_task is not None and not self.inference_task.done():
                 raise ValueError("The previous request is still finishing.")
             self._launch_round_locked(self.round_buffer.copy(), retry=True)
+        LOGGER.info("Paused round retry accepted round=%d", self.round_counter + 1)
 
     async def _resolve_round(self, epoch: int) -> None:
         """Measure all round work, including failed host attempts."""
@@ -375,6 +388,7 @@ class GameEngine(LobbyMixin):
                 notes.append("[SYSTEM: Explain this player's in-world return.]")
             llm_actions[name] = " ".join([*notes, actions[item]])
         plan_dice = getattr(self.resolver, "plan_dice", None)
+        reused_dice = pending["dice"] is not None
         if pending["dice"] is None:
             pending["dice"] = {}
             if plan_dice is not None:
@@ -389,6 +403,17 @@ class GameEngine(LobbyMixin):
                 pending["dice"] = {
                     name: roll_d100() for name, required in plan.rolls.items() if required
                 }
+        if self.private_guidance:
+            LOGGER.info(
+                "Private guidance checks round=%d generation=%d reused=%s rolls=%s",
+                self.round_counter + 1,
+                epoch,
+                reused_dice,
+                json.dumps(
+                    {name: pending["dice"][name] for name in sorted(pending["hidden"])},
+                    ensure_ascii=True,
+                ),
+            )
         if plan_dice is None:
             resolution = await self.resolver.generate_resolution(llm_actions)
         else:
@@ -475,6 +500,9 @@ class GameEngine(LobbyMixin):
         tokens = getattr(self.resolver, "last_token_usage", None)
         if tokens is None:
             return
+        refresh = getattr(self.resolver, "refresh_usage", None)
+        if refresh is not None:
+            await refresh()
         snapshot = getattr(self.resolver, "usage_snapshot", None)
         event = ServerEvent(
             type="token_usage",

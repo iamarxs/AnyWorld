@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, ValidationError, create_model
 import tiktoken
 
 from core.config import settings
-from core.schemas import ContextSummary, DicePlan, RoundResolution, SummaryAudit
+from core.schemas import ContextSummary, DicePlan, RoundResolution, ScenarioTitle, SummaryAudit
 from logic.usage import UsageTotals, counter
 from logic.dice import describe_roll
 from logic.presentation import name_resolution
@@ -99,6 +99,8 @@ class LLMContextManager:
         self._http: httpx.AsyncClient | None = None
         # A configured value is the fallback; successful llama.cpp discovery takes precedence.
         self.context_window_size = settings.llm.context_window_size
+        self.context_window_source = "configured fallback"
+        self._retained_measurement = None
         self._context_discovered = settings.llm.provider != "compatible"
         self.system_prompt = {"role": "system", "content": settings.llm.system_prompt}
         # Local model tokenization is obtained from the backend, never guessed from
@@ -162,6 +164,7 @@ class LLMContextManager:
             )
         self.genesis_state = {"role": "user", "content": content}
         self.history.clear()
+        self._retained_measurement = None
         self._text_counts.clear()
         self._request_counts.clear()
         self._last_response_text = None
@@ -178,28 +181,26 @@ class LLMContextManager:
         self.last_round_error: str | None = None
         self._round_started = None
 
-    async def generate_initial_state(self) -> RoundResolution:
-        """Generate the initial scenario state before players join."""
-        logger.info("Generating initial scenario state")
+    async def generate_scenario_title(self) -> str:
+        """Generate only a title, without creating or remembering narrative."""
+        logger.info("Generating scenario title")
         prompt = {
             "role": "user",
             "content": (
-                "Create a concise, evocative scenario title; round_title is required and must "
-                "not be null or empty. Also create a vivid initial current-state paragraph "
-                "with at least one immediate opportunity, tension, or story hook. Do not name, "
-                "describe, count, or otherwise establish the player characters or party; their "
-                "actual names are supplied only when the game starts. Set player_resolutions to "
-                "an empty object."
+                "Return only a concise, evocative title for the host's scenario, in its "
+                "language, as plain text in the title field. Do not generate an opening, "
+                "world state, story events, or player characters. The party has not joined yet. "
+                "Do not reveal private DM guidance in the title."
             ),
         }
-        return await self._request(
+        result = await self._request(
             prompt,
-            participant_schema(RoundResolution, ()),
-            remember=True,
-            kind="initial",
-            expected_names=(),
-            title_required=True,
+            ScenarioTitle,
+            remember=False,
+            include_history=False,
+            kind="title",
         )
+        return result.title.strip()
 
     async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
         """Introduce the joined players in the scenario when play begins."""
@@ -209,8 +210,23 @@ class LLMContextManager:
         prompt = {
             "role": "user",
             "content": (
-                "The game is now starting. Rewrite the current "
-                "world state to introduce exactly "
+                "The game is now starting. Write an enhanced opening scenario based on the "
+                "host's original scenario. Put the complete opening, including every player's "
+                "introduction, in global_narrative. Players have not seen the host's original "
+                "description: this opening must stand on its own. Clearly establish the "
+                "setting, starting situation, and central premise. Explicitly communicate "
+                "the player-facing goal from the host's scenario: what the party is trying "
+                "to accomplish, why it matters, and any stated stakes or constraints. Preserve "
+                "these essentials in the narrative rather than replacing them with atmosphere. "
+                " If no goal is specified, present the immediate "
+                "opportunity or story hook without inventing an unrelated mission. Reveal only "
+                "what the characters can know; keep private DM guidance, secret objectives, "
+                "and hidden solutions out of the opening. Add vivid atmosphere "
+                "and organize longer openings into short paragraphs: establish the setting, "
+                "introduce the players, then present the immediate goal or hook. Separate "
+                "paragraphs with a blank line. Add narrative flair "
+                "while preserving the host's premise, facts, constraints, "
+                "and immediate story hook. Weave in introductions for exactly "
                 "these player characters by their supplied names: "
                 f"{names}. Give each a brief scenario-appropriate occupation, class, role, or "
                 "other character description. Do not add, remove, or rename players, and do not "
@@ -224,6 +240,7 @@ class LLMContextManager:
             remember=True,
             kind="initial",
             expected_names=(),
+            opening_names=tuple(player_names),
         )
 
     async def plan_dice(self, round_buffer: dict[str, str], current_state: str = "") -> DicePlan:
@@ -303,7 +320,20 @@ class LLMContextManager:
                 "using their exact names. Use only the supplied dice; resolve unchecked actions "
                 "from the situation, without inventing failure or guaranteeing impossible feats. "
                 "Set round_title to null and give a brief global_narrative of the resulting "
-                "shared state.\n\nCurrent round actions:\n"
+                "shared state. Derive global_narrative from resolved actions: lead with concrete "
+                "changes to surroundings, objects, routes, hazards, and characters, not generic "
+                "atmosphere or unrelated plot. Include affected characters' physical condition, "
+                "position, and ability to act. A painful landed blow needs a proportionate bodily "
+                "reaction, not merely confusion or agitation; subsequent movement must fit the "
+                "resolved pain, injury, and balance. Do not assume every hit incapacitates: "
+                "severity and resistance must follow established facts and supplied dice. "
+                "A fallen character stays down unless getting up is resolved. Cross-check all "
+                "fields for consistent positions, injuries, capabilities, object states, and "
+                "successes or failures as one simultaneous outcome. Do not confine shared "
+                "consequences to individual outcomes or contradict them in global_narrative. "
+                "Preserve earlier changes unless current events alter them. If the environment "
+                "is unchanged, describe its relevant continuing state without inventing changes. "
+                "\n\nCurrent round actions:\n"
                 f"{actions}{roll_context}\nRequired player_resolutions keys: "
                 + json.dumps(list(round_buffer), ensure_ascii=False)
                 + ". Give each a nonempty outcome. global_narrative must be nonempty even "
@@ -335,6 +365,8 @@ class LLMContextManager:
 
     def _output_limit(self, kind: str) -> int:
         """Return the configured output token cap for a request kind."""
+        if kind == "title":
+            return min(128, settings.llm.initial_output_tokens)
         cap_kind = "summary" if kind == "summary_audit" else kind
         return getattr(settings.llm, f"{cap_kind}_output_tokens")
 
@@ -374,7 +406,9 @@ class LLMContextManager:
             return {"chat_template_kwargs": {"enable_thinking": settings.llm.enable_thinking}}
         return {}
 
-    async def _input_tokens(self, messages: list[dict[str, str]], schema: type[BaseModel]) -> int:
+    async def _input_tokens(
+        self, messages: list[dict[str, str]], schema: type[BaseModel] | None
+    ) -> int:
         """Reuse bounded counts for identical formatted requests and tokenizer identity."""
         identity = (
             settings.llm.provider,
@@ -383,7 +417,7 @@ class LLMContextManager:
             settings.llm.tokenizer_encoding,
             self._template_identity,
             self._template_options(),
-            self._schema_text(schema),
+            self._schema_text(schema) if schema is not None else None,
             messages,
         )
         key = sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).digest()
@@ -401,7 +435,7 @@ class LLMContextManager:
         return count
 
     async def _uncached_input_tokens(
-        self, messages: list[dict[str, str]], schema: type[BaseModel]
+        self, messages: list[dict[str, str]], schema: type[BaseModel] | None
     ) -> int:
         """Count input tokens using the backend tokenizer or a conservative estimate."""
         if settings.llm.provider == "openai" and not self._encoding_loaded:
@@ -433,11 +467,18 @@ class LLMContextManager:
                 token_ids = tokens.json()["tokens"]
                 if not isinstance(token_ids, list):
                     raise ValueError("Invalid tokenizer response")
+                if schema is None:
+                    self.token_count_method = "backend template/tokenizer"
+                    return len(token_ids)
                 self.token_count_method = "backend template/tokenizer + schema allowance"
                 return len(token_ids) + self._count_tokens(self._schema_text(schema)) + 64
             except (httpx.HTTPError, ValueError, KeyError, TypeError):
                 self.token_count_method = "conservative UTF-8 estimate"
-        return self._estimate_input(messages, schema)
+        return (
+            self._estimate_input(messages, schema)
+            if schema is not None
+            else self._context_size(messages)
+        )
 
     async def preflight_round(self, actions: dict[str, str], current_state: str = "") -> None:
         """Reject impossible fixed context/actions before accepting the next action.
@@ -469,6 +510,7 @@ class LLMContextManager:
         private_rolls: dict[str, int] | None = None,
         expected_names: tuple[str, ...] | None = None,
         title_required: bool = False,
+        opening_names: tuple[str, ...] | None = None,
     ) -> Any:
         """Run a single LLM request, optionally compacting history and remembering the result."""
         if issubclass(schema, RoundResolution):
@@ -481,7 +523,12 @@ class LLMContextManager:
                     "and verb. Describe what "
                     "happened, not just the attempted action. Each player's outcome must stand "
                     "alone, without continuing another field's sentence. Use plain text without "
-                    "markup or name labels. Translate disconnect/return annotations into "
+                    "markup or name labels. Separate longer global narratives and individual "
+                    "player outcomes into short, coherent paragraphs using blank lines "
+                    "(two newline characters). Start a new paragraph when the focus, scene, "
+                    "or consequence changes. Keep short descriptions in one paragraph; do not "
+                    "pad the prose or put every sentence on a separate line. "
+                    "Translate disconnect/return annotations into "
                     "in-world absence or return, keeping technical status out of the story."
                 ),
             }
@@ -493,8 +540,22 @@ class LLMContextManager:
             result = await self._parse(messages, schema, kind, repair_attempt=repair)
             try:
                 self._check_semantics(result, expected_names, title_required)
+                if isinstance(result, ScenarioTitle):
+                    public_title = RoundResolution(
+                        global_narrative=result.title, player_resolutions={}
+                    )
+                    self._check_semantics(public_title, ())
+                    self._check_public_output(public_title, {})
                 if isinstance(result, RoundResolution):
                     self._check_public_output(result, private_rolls or {})
+                    if opening_names is not None and any(
+                        name.casefold() not in result.global_narrative.casefold()
+                        for name in opening_names
+                    ):
+                        raise LLMResolutionError(
+                            "Opening narrative must introduce every player by their supplied "
+                            "name with an occupation, class, or role: " + json.dumps(opening_names)
+                        )
                 break
             except LLMResolutionError as exc:
                 logger.warning(
@@ -651,8 +712,21 @@ class LLMContextManager:
             self.round_failures += error is not None
             self.last_round_error = error
 
+    async def refresh_usage(self) -> None:
+        """Measure retained messages with the request tokenizer, without inference."""
+        messages = [*self._fixed_messages(), *self.history]
+        count = await self._input_tokens(messages, None)
+        self._retained_measurement = (messages, count, self.token_count_method)
+
     def usage_snapshot(self) -> dict[str, Any]:
         """Separate estimated retained messages from billed request consumption."""
+        messages = [*self._fixed_messages(), *self.history]
+        measured = self._retained_measurement
+        if measured is not None and measured[0] == messages:
+            retained, method = measured[1:]
+        else:
+            retained = self._context_size(messages)
+            method = "local tokenizer estimate" if self.encoding else "conservative UTF-8 estimate"
         return {
             "round_number": self.usage_round,
             "round_failures": self.round_failures,
@@ -665,9 +739,10 @@ class LLMContextManager:
                 kind: usage.snapshot() for kind, usage in self.round_usage_by_kind.items()
             },
             "last_request": self.last_request,
-            "retained_context_tokens": self._context_size([*self._fixed_messages(), *self.history]),
+            "retained_context_tokens": retained,
             "context_window_size": self.context_window_size,
-            "counting_method": "Retained messages: estimated; excludes next input/schema/output",
+            "context_window_source": self.context_window_source,
+            "counting_method": f"Retained messages: {method}; excludes next input/schema/output",
         }
 
     async def _parse(
@@ -700,6 +775,7 @@ class LLMContextManager:
                         )
                         if not transient or attempt == settings.llm.max_retries:
                             raise
+                        logger.info("Retrying LLM request kind=%s attempt=%d", kind, attempt + 2)
                         await asyncio.sleep(min(0.5 * 2**attempt, 8.0))
         except TimeoutError as exc:
             raise LLMResolutionError("The model request failed: deadline exceeded.") from exc
@@ -806,6 +882,8 @@ class LLMContextManager:
     ) -> None:
         """Merge old pairs into durable memory transactionally; never FIFO-forget."""
         original_memory, original_history = self.memory, self.history
+        started = perf_counter()
+        passes = 0
         compacted = False
         summary_schema = (
             participant_schema(ContextSummary, tuple(self._known_player_names))
@@ -828,6 +906,18 @@ class LLMContextManager:
                     and not checkpoint_due
                     and (not compacted or target_fits or not self.history)
                 ):
+                    if compacted:
+                        logger.info(
+                            "Context compaction complete kind=%s passes=%d messages=%d->%d "
+                            "input_tokens=%d counting_method=%s elapsed_seconds=%.3f",
+                            kind,
+                            passes,
+                            len(original_history),
+                            len(self.history),
+                            count,
+                            self.token_count_method,
+                            perf_counter() - started,
+                        )
                     return
                 if not self.history:
                     raise LLMResolutionError("Durable memory and current input do not fit.")
@@ -863,9 +953,28 @@ class LLMContextManager:
                         break
                     selected, compact_messages = length, candidate
                 if not selected and fits:
+                    logger.info(
+                        "Context compaction deferred kind=%s reason=no_summary_fits "
+                        "retained_messages=%d passes=%d",
+                        kind,
+                        len(self.history),
+                        passes,
+                    )
                     return
                 if not selected:
                     raise LLMResolutionError("History cannot be safely summarized within budget.")
+                passes += 1
+                logger.info(
+                    "Context compaction started kind=%s pass=%d reason=%s "
+                    "selected_messages=%d input_tokens=%d context_window=%d counting_method=%s",
+                    kind,
+                    passes,
+                    "history_limit" if checkpoint_due and fits else "token_budget",
+                    selected,
+                    count,
+                    self.context_window_size,
+                    self.token_count_method,
+                )
                 summary = await self._parse(compact_messages, summary_schema, "summary")
                 self._check_semantics(summary, tuple(self._known_player_names) or None)
                 if not summary.world_state.strip():
@@ -883,6 +992,7 @@ class LLMContextManager:
                     raise LLMResolutionError(
                         "Summary did not reduce context; original memory retained."
                     )
+                logger.info("Context compaction audit started kind=%s pass=%d", kind, passes)
                 audit = await self._parse(
                     [
                         *compact_messages,
@@ -911,9 +1021,26 @@ class LLMContextManager:
                 self.memory = memory
                 self.history = self.history[selected:]
                 compacted = True
-        except BaseException:
+                logger.info(
+                    "Context compaction pass accepted kind=%s pass=%d "
+                    "estimated_memory_tokens=%d->%d",
+                    kind,
+                    passes,
+                    before,
+                    self._context_size([memory]),
+                )
+        except BaseException as exc:
             # Cancellation must not leave a half-compacted conversation either.
             self.memory, self.history = original_memory, original_history
+            logger.warning(
+                "Context compaction rolled back kind=%s error=%s passes=%d "
+                "restored_messages=%d elapsed_seconds=%.3f",
+                kind,
+                type(exc).__name__,
+                passes,
+                len(original_history),
+                perf_counter() - started,
+            )
             raise
 
     async def discover_context_window(self) -> None:
@@ -942,6 +1069,7 @@ class LLMContextManager:
                 and discovered >= 2048
             ):
                 self.context_window_size = discovered
+                self.context_window_source = "llama.cpp /props per-slot n_ctx"
                 self._context_discovered = True
         except (httpx.HTTPError, ValueError, TypeError, AttributeError):
             pass

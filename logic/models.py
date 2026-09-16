@@ -73,8 +73,8 @@ class ResolutionManager(Protocol):
         """Discover the backend context window size."""
         ...
 
-    async def generate_initial_state(self) -> RoundResolution:
-        """Generate the initial scenario state."""
+    async def generate_scenario_title(self) -> str:
+        """Generate only the scenario title before players join."""
         ...
 
     async def generate_start_state(self, player_names: list[str]) -> RoundResolution:

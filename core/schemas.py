@@ -65,6 +65,12 @@ class RoundResolution(StrictModel):
     player_resolutions: dict[str, str]
 
 
+class ScenarioTitle(StrictModel):
+    """Title-only preparation before the party has joined."""
+
+    title: str
+
+
 class SummaryAudit(StrictModel):
     """Private check of a proposed memory checkpoint against its source context."""
 

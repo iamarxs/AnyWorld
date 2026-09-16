@@ -37,6 +37,7 @@ class LobbyMixin:
             handler = getattr(self, self.PAYLOAD_HANDLERS[payload.event_type])
             await handler(client_id, payload.data)
         except ValueError as exc:
+            LOGGER.info("Client event rejected event=%s", payload.event_type)
             await self._send_error(client_id, str(exc))
             if payload.event_type == "action":
                 async with self.effects_lock:
@@ -128,6 +129,7 @@ class LobbyMixin:
                     self._launch_round_locked(actions)
             snapshot = self._snapshot_locked(player)
         await self.sender.send_personal(client_id, ServerEvent(type="auth_ok", payload=snapshot))
+        LOGGER.info("Player authenticated reconnect=%s host=%s", rejoined, player.is_host)
         verb = "rejoined" if rejoined else "connected"
         await self.sender.broadcast_global(
             ServerEvent(type="system_msg", payload={"msg": f"{name} {verb}."})
@@ -180,23 +182,26 @@ class LobbyMixin:
     async def _prepare_scenario(
         self: "GameEngine", epoch: int, client_id: str, scenario: str, guidance: str
     ) -> None:
-        """Generate the initial scenario state and publish it to the host."""
+        """Generate only the title and open the lobby for players."""
         self.resolver.set_genesis(scenario, guidance)
-        resolution = await self.resolver.generate_initial_state()
+        title = await self.resolver.generate_scenario_title()
         async with self.effects_lock:
             async with self.lock:
                 if not self._job_current(epoch):
                     return
                 self.original_scenario = scenario
                 self.private_guidance = guidance
-                self.scenario_title = resolution.round_title or "Untitled Session"
-                self.current_scenario_state = resolution.global_narrative
+                self.scenario_title = title
                 self.state = GameState.AWAITING_PLAYERS
             await self.sender.send_personal(
                 client_id,
-                ServerEvent(type="scenario_ready", payload={"title": self.scenario_title}),
+                ServerEvent(
+                    type="scenario_ready",
+                    payload={"title": self.scenario_title, "original_scenario": scenario},
+                ),
             )
             await self._publish_usage(client_id)
+            LOGGER.info("Scenario title ready; lobby accepting players")
 
     async def _start_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         """Accept the host's start command and launch the start job."""
@@ -231,12 +236,11 @@ class LobbyMixin:
                 if not self._job_current(epoch):
                     return
                 self.current_scenario_state = resolution.global_narrative
+                self.opening_scenario = resolution.global_narrative
                 self.state = GameState.ACTIVE_TURN
                 directive = self._next_turn_locked()
             payload = resolution.model_dump()
-            payload.update(
-                round_title=self.scenario_title, original_scenario=self.original_scenario
-            )
+            payload.update(round_title=self.scenario_title)
             await self.sender.broadcast_global(ServerEvent(type="state_update", payload=payload))
             await self.sender.broadcast_global(
                 ServerEvent(type="system_msg", payload={"msg": "The game has started."})
@@ -246,6 +250,7 @@ class LobbyMixin:
             )
             if directive is not None:
                 await self.sender.broadcast_global(directive)
+            LOGGER.info("Game started players=%d", len(names))
 
     async def _end_game(self: "GameEngine", client_id: str, data: dict[str, object]) -> None:
         """Validate the host's end command and shut down the session."""
@@ -286,6 +291,7 @@ class LobbyMixin:
             "is_host": player.is_host,
             "state": self.state.name,
             "scenario_title": self.scenario_title,
+            "opening_scenario": self.opening_scenario,
             "original_scenario": self.original_scenario,
             "scenario_state": self.current_scenario_state,
             "completed_round_number": self.round_counter or None,
