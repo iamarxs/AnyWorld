@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 import re
 import sys
 
@@ -38,7 +39,17 @@ def main() -> None:
         "--port", type=int, default=settings.server.port, help="Bind socket to this port."
     )
     parser.add_argument("--reload", action="store_true", help="Enable development auto-reload.")
+    parser.add_argument(
+        "--debug-raw-responses",
+        "--debug",
+        action="store_true",
+        help="Save private raw LLM responses under .debug/llm/.",
+    )
     args = parser.parse_args()
+    if args.debug_raw_responses:
+        settings.llm.debug_raw_responses = True
+        # Uvicorn reload starts a fresh interpreter; carry the launch override there too.
+        os.environ["ANYWORLD_DEBUG_RAW_RESPONSES"] = "1"
 
     logging.basicConfig(
         level=logging.INFO,

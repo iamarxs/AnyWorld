@@ -208,6 +208,15 @@ to act as the DM for the game. Use the best quantization you can while preservin
 context for longer games. The game does intelligently compact the context when it reaches a certain
 fill ratio, but no less than 64k is recommended.
 
+For Gemma 4 models, these settings are recommended:
+
+- temperature 1.0
+- top-p 0.95
+- top-k 20
+- min-p 0.0
+- presence-penalty 0.0
+- repeat-penalty 1.0
+
 ### HTTPS certificates
 
 `api/tls_bootstrap.py` creates `certs/cert.pem` and `certs/key.pem`. It attempts public-IP
@@ -256,3 +265,22 @@ node --test tests/client_reconnect.test.cjs
 
 Tests use isolated settings and fake model clients; they do not require a running LLM. They
 can create temporary transcripts and `.logged_games/`, so they are not strictly read-only checks.
+
+## Raw model diagnostics
+
+To investigate generated wording, launch with `python app.py --debug` or
+`anyworld --debug-raw-responses`. The flag also works with `--reload` and enables logging
+for that launch without changing `config.yaml`. Alternatively, set `debug_raw_responses: true`
+under `llm` in the configuration. Logging is disabled by default. Restarting the application
+resets the current game. Each completion HTTP response is saved as a timestamped JSON file under
+`.debug/llm/` in the working directory. The `body` field contains the raw response text,
+recorded before SDK parsing, narrative checks, name normalization, or display. This includes
+responses rejected during retries and HTTP error responses. Connection failures with no HTTP
+response cannot produce a raw-response file.
+
+These files are private diagnostics: model output can include hidden dice or private guidance,
+and error bodies can contain sensitive data. They are excluded from Git and are not served by
+the web app. Request prompts, headers, and credentials are not deliberately logged. Files are
+not automatically rotated; disable the option after diagnosis and remove unneeded logs.
+Sampling settings remain controlled by the backend; Anyworld does not override repetition or
+presence penalties.

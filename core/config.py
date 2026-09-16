@@ -1,6 +1,7 @@
 """Validated application configuration loaded from YAML."""
 
 from pathlib import Path
+import os
 from typing import Any, Literal
 
 import yaml
@@ -35,6 +36,7 @@ class LLMConfig(BaseModel):
     request_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
     max_retries: int = Field(default=1, ge=0, le=3)
     enable_thinking: bool | None = None
+    debug_raw_responses: bool = False
     planner_system_prompt: str | None = None
     compaction_target_fraction: float = Field(default=0.75, ge=0.5, le=1.0)
     history_round_limit: int | None = Field(default=None, ge=2, le=100)
@@ -110,3 +112,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings.load()
+if os.environ.get("ANYWORLD_DEBUG_RAW_RESPONSES") == "1":
+    settings.llm.debug_raw_responses = True
