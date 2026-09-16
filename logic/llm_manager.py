@@ -12,7 +12,13 @@ from hashlib import sha256
 from html import unescape
 
 import httpx
-from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, OpenAIError
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    DefaultAsyncHttpxClient,
+    OpenAIError,
+)
 from pydantic import BaseModel, Field, ValidationError, create_model
 import tiktoken
 
@@ -21,6 +27,7 @@ from core.schemas import ContextSummary, DicePlan, RoundResolution, SummaryAudit
 from logic.usage import UsageTotals, counter
 from logic.dice import describe_roll
 from logic.presentation import name_resolution
+from logic.debug_log import RawResponseLogger
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +137,10 @@ class LLMContextManager:
         }
         if settings.llm.provider == "compatible":
             client_options["base_url"] = settings.llm.endpoint
+        if settings.llm.debug_raw_responses:
+            client_options["http_client"] = DefaultAsyncHttpxClient(
+                event_hooks={"response": [RawResponseLogger().capture]}
+            )
         return AsyncOpenAI(**client_options)
 
     def set_genesis(self, scenario: str, guidance: str = "") -> None:
@@ -287,20 +298,12 @@ class LLMContextManager:
         prompt = {
             "role": "user",
             "content": (
-                "Resolve these actions as one simultaneous, causally coherent round. "
-                "Set round_title to null; the established title is unchanged. "
-                "Reconcile interactions with the target's action and established facts. Move "
-                "the story forward with concrete outcomes. Use each exact player name as its "
-                "player_resolutions key and copy that spelling and capitalization verbatim "
-                "wherever the player appears in prose, including global_narrative. Never "
-                "shorten, translate, or invent a variant of a supplied name. Write each value "
-                "as narrative prose, with no leading 'Name:' or '[Name]' label; the interface "
-                "already labels outcomes. Emit no outcome for absent players. Only the supplied "
-                "dice results are authoritative; never invent additional rolls. For actions "
-                "without a roll, resolve ordinary observations and feasible actions directly "
-                "from established facts. No roll does not make an impossible action succeed. "
-                "Do not hide obvious information behind an invented failure or sensory "
-                "disruption.\n\nCurrent round actions:\n"
+                "Resolve the simultaneous actions together, respecting established facts "
+                "and each target's choices. Describe concrete results for each supplied player "
+                "using their exact names. Use only the supplied dice; resolve unchecked actions "
+                "from the situation, without inventing failure or guaranteeing impossible feats. "
+                "Set round_title to null and give a brief global_narrative of the resulting "
+                "shared state.\n\nCurrent round actions:\n"
                 f"{actions}{roll_context}\nRequired player_resolutions keys: "
                 + json.dumps(list(round_buffer), ensure_ascii=False)
                 + ". Give each a nonempty outcome. global_narrative must be nonempty even "
@@ -473,12 +476,13 @@ class LLMContextManager:
                 **prompt,
                 "content": prompt["content"]
                 + (
-                    "\nWrite all narrative fields as plain prose, without HTML/XML tags, "
-                    "escaped tags, code fences, or technical status/error messages. "
-                    "Disconnect/idle/return annotations are out-of-world bookkeeping: "
-                    "describe only a plausible in-world absence, inaction, or return. "
-                    "Never echo SYSTEM annotations, I/O errors, network state, or the "
-                    "player's real-world connection status into the story."
+                    "\nWrite concise, natural prose in the language of the scenario. "
+                    "For an English scenario, use complete English sentences with a subject "
+                    "and verb. Describe what "
+                    "happened, not just the attempted action. Each player's outcome must stand "
+                    "alone, without continuing another field's sentence. Use plain text without "
+                    "markup or name labels. Translate disconnect/return annotations into "
+                    "in-world absence or return, keeping technical status out of the story."
                 ),
             }
         await self.discover_context_window()
@@ -589,6 +593,16 @@ class LLMContextManager:
                 raise LLMResolutionError("Invalid resolution participants.")
             if any(not value.strip() for value in result.player_resolutions.values()):
                 raise LLMResolutionError("Model returned an empty player outcome.")
+            for value in result.player_resolutions.values():
+                # Catch clear incomplete clauses without requiring English punctuation
+                # on every outcome or trying to move text between player identities.
+                ending = value.rstrip().rstrip("\"'\u2019\u201d)]}").rstrip()
+                if ending.endswith((",", ";", ":")) or re.match(r"\s*\$[A-Za-z]", value):
+                    raise LLMResolutionError(
+                        "Player outcomes must be complete, self-contained prose. Finish "
+                        "sentences inside their own player field, not the next player's field; "
+                        "remove stray prefixes. Preserve the supplied actions, dice and facts."
+                    )
 
     def _check_public_output(self, result: RoundResolution, private_rolls: dict[str, int]) -> None:
         """Reject direct guidance echoes and explicit hidden dice disclosures.
