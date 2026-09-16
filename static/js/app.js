@@ -101,6 +101,8 @@ const elements = {
     identity: document.getElementById("player-identity"),
     log: document.getElementById("log-pane"),
     playerList: document.getElementById("player-list"),
+    lobbyPlayerList: document.getElementById("lobby-player-list"),
+    lobbyPlayerCount: document.getElementById("lobby-player-count"),
     chatMessages: document.getElementById("chat-messages"),
     chatForm: document.getElementById("chat-form"),
     chatInput: document.getElementById("chat-input"),
@@ -182,17 +184,25 @@ function setPlayerOrder(playerOrder = []) {
 }
 
 function renderPlayers(players = []) {
-    elements.playerList.replaceChildren();
-    players.forEach((player, index) => {
-        playerColors.set(player.name, index % 8);
-        const item = document.createElement("li");
-        item.className = player.connected ? "player-online" : "player-offline";
-        const dot = document.createElement("span");
-        dot.className = "presence-dot";
-        const name = document.createElement("span");
-        name.textContent = `${player.name}${player.is_host ? " · Host" : ""}`;
-        item.append(dot, name);
-        elements.playerList.appendChild(item);
+    const connected = players.filter((player) => player.connected).length;
+    elements.lobbyPlayerCount.textContent = `${connected} of ${players.length} players connected (including host)`;
+    [elements.playerList, elements.lobbyPlayerList].forEach((list) => {
+        list.replaceChildren();
+        players.forEach((player, index) => {
+            playerColors.set(player.name, index % 8);
+            const item = document.createElement("li");
+            item.className = player.connected ? "player-online" : "player-offline";
+            const dot = document.createElement("span");
+            dot.className = "presence-dot";
+            dot.setAttribute("aria-hidden", "true");
+            const name = document.createElement("span");
+            name.textContent = `${player.name}${player.is_host ? " · Host" : ""}`;
+            const status = document.createElement("span");
+            status.className = "player-presence-label";
+            status.textContent = player.connected ? "Connected" : "Disconnected";
+            item.append(dot, name, status);
+            list.appendChild(item);
+        });
     });
 }
 

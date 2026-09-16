@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Anyworld</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=12">
+  <link rel="stylesheet" href="/static/css/style.css?v=13">
   <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
   <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
@@ -75,6 +75,10 @@
       <section id="lobby-step" hidden>
         <h2>Scenario ready</h2>
         <p>Players may now join. Start when everyone is ready.</p>
+        <div id="lobby-roster" aria-label="Players in the lobby">
+          <p id="lobby-player-count" role="status"></p>
+          <ul id="lobby-player-list"></ul>
+        </div>
         <button id="start-button" type="button">Start game</button>
       </section>
       <p id="host-status" role="status"></p>
@@ -88,7 +92,7 @@
   <button id="end-game-button" type="button" hidden>End game</button>
   <button id="retry-round-button" type="button" hidden>Retry paused round</button>
   <div id="connection-status" role="status">Connecting...</div>
-  <script src="/static/js/app.js?v=reconnect-8"></script>
+  <script src="/static/js/app.js?v=lobby-9"></script>
 </body>
 
 </html>

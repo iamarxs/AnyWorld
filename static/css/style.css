@@ -84,14 +84,16 @@ body {
     letter-spacing: 0.1em;
     text-transform: uppercase;
 }
-#player-list {
+#player-list,
+#lobby-player-list {
     display: grid;
     gap: 0.45rem;
     margin: 0;
     padding: 0;
     list-style: none;
 }
-#player-list li {
+#player-list li,
+#lobby-player-list li {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -470,4 +472,34 @@ button:disabled {
         animation: none !important;
         transition: none !important;
     }
+}
+
+#lobby-roster {
+    margin-top: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.65rem;
+    background: var(--background);
+}
+#lobby-player-list {
+    margin-top: 0.75rem;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+#lobby-player-list li {
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+}
+#lobby-player-list li > span:nth-child(2) { min-width: 0; }
+.player-presence-label {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 0.75rem;
+}
+#player-list .player-presence-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
 }
