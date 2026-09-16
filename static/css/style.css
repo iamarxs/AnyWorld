@@ -175,8 +175,9 @@ body {
 #game-banner {
     display: block;
     width: 100%;
+    max-width: 1376px;
     height: auto;
-    margin: 0 0 1.25rem;
+    margin: 0 auto 1.25rem;
     border: 1px solid var(--border);
     border-radius: 0.8rem;
     box-shadow: 0 12px 32px rgb(0 0 0 / 24%);
