@@ -156,7 +156,7 @@ def test_end_during_every_phase_is_terminal_and_chat_is_responsive(tmp_path, pha
         assert "PRIVATE" not in str(sender.events)
         if engine.transcript.path is not None:
             text = engine.transcript.path.read_text(encoding="utf-8")
-            assert text.endswith("</html>\n") and "PRIVATE" not in text
+            assert text.endswith("</html>\n")
 
     asyncio.run(run())
 
@@ -201,7 +201,12 @@ def test_failed_resolution_retries_identical_rolls_and_keeps_hidden_checks_priva
         assert resolver.received_actions[0] == resolver.received_actions[1]
         assert sender.events_of_type("state_update")[-1].payload["dice_results"] == {}
         text = engine.transcript.path.read_text(encoding="utf-8")
-        assert "Dice rolls" not in text and "PRIVATE" not in text
+        assert "Dice rolls" not in text
+        assert "Private checks from DM guidance" in text
+        assert "PRIVATE_TRIGGER" in text
+        for name, roll in resolver.received_rolls[1].items():
+            assert f"{name}: {roll}/100" in text
+        assert "PRIVATE_TRIGGER" not in str(sender.events)
         await engine.shutdown()
         assert resolver.closed
 
@@ -377,5 +382,21 @@ def test_disconnect_triggered_round_reports_backend_outage_and_retries(tmp_path,
         await engine.wait_for_inference()
         assert engine.round_counter == 1
         assert not engine.round_paused
+
+    asyncio.run(run())
+
+
+def test_opening_transcript_includes_private_guidance_but_live_events_do_not(tmp_path):
+    """The live start path persists the public scenario separately from private DM notes."""
+
+    async def run():
+        engine, sender, _ = await setup(tmp_path)
+        content = engine.transcript.path.read_text(encoding="utf-8")
+        assert "<h2>Opening scenario</h2>" in content
+        assert '<p class="state">A locked gate</p>' in content
+        assert content.index("Opening scenario") < content.index("Opening state")
+        assert "PRIVATE_TRIGGER" in content
+        assert "PRIVATE_TRIGGER" not in str(sender.events)
+        await engine.shutdown()
 
     asyncio.run(run())

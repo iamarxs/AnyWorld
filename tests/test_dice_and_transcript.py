@@ -24,7 +24,9 @@ def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:
 
     async def run() -> None:
         transcript = GameTranscript(tmp_path)
-        await transcript.start("A <Quest>", "An & opening")
+        await transcript.start(
+            "A <Quest>", "An & opening", "A <cabin> & a river.\nFind a way home."
+        )
         await transcript.append_round(
             1,
             {"Alice": "Uses <fire>"},
@@ -40,6 +42,36 @@ def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:
         assert transcript.path.suffix == ".html"
         assert "A &lt;Quest&gt;" in content
         assert "Uses &lt;fire&gt;" in content
+        assert "A &lt;cabin&gt; &amp; a river.\nFind a way home." in content
+        assert content.index("Opening scenario") < content.index("Opening state")
         assert content.endswith("</html>\n")
+
+    asyncio.run(run())
+
+
+def test_private_transcript_sections_escape_content_and_omit_empty_sections(tmp_path):
+    """Archive hidden checks without interpreting host guidance or player names as HTML."""
+
+    async def run():
+        transcript = GameTranscript(tmp_path)
+        await transcript.start("Quest", "Opening", "Scenario", "Secret <trap> & trigger")
+        await transcript.append_round(
+            1,
+            {"<Alice>": "Wait"},
+            RoundResolution(global_narrative="A breeze.", player_resolutions={"<Alice>": "Waits."}),
+            {"Bob": 75},
+            hidden_dice_results={"<Alice>": 12},
+        )
+        content = transcript.path.read_text(encoding="utf-8")
+        assert "Secret &lt;trap&gt; &amp; trigger" in content
+        assert content.index("Opening scenario") < content.index("Private DM guidance")
+        assert content.index("Private DM guidance") < content.index("Opening state")
+        assert "&lt;Alice&gt;: 12/100" in content
+        assert "Bob: 75/100" in content
+        assert content.count("Private checks from DM guidance") == 1
+        empty = GameTranscript(tmp_path)
+        await empty.start("No secrets", "Opening")
+        assert "Private DM guidance" not in empty.path.read_text(encoding="utf-8")
+        assert GameTranscript._render_dice_section({}) == ""
 
     asyncio.run(run())

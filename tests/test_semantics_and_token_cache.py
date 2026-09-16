@@ -280,3 +280,85 @@ def test_plain_prose_comparisons_and_in_world_inaction_remain_valid():
         player_resolutions={"Arxs": "Arxs waits beside a disconnected cable."},
     )
     LLMContextManager._check_semantics(result, ("Arxs",))
+
+
+@pytest.mark.parametrize(
+    "bad_outcome",
+    [
+        "When Arxs asks where they are from,",
+        "Arxs waits;",
+        "The dwarf says:",
+        "$the dwarves only respond by waving their hands.",
+    ],
+)
+def test_incomplete_player_fields_are_rejected_without_remembering(bad_outcome):
+    """Obvious field-boundary damage must not become authoritative history."""
+
+    async def run():
+        client = FakeClient(
+            RoundResolution(
+                global_narrative="The dwarves gather by the river.",
+                player_resolutions={
+                    "Arxs": bad_outcome,
+                    "Blarblablax": "Blarblablax follows Arxs.",
+                },
+            )
+        )
+        manager = LLMContextManager(client)
+        with pytest.raises(LLMResolutionError, match="self-contained"):
+            await manager.generate_resolution({"Arxs": "Ask the dwarves", "Blarblablax": "Follow"})
+        assert manager.history == []
+        assert len(client.calls) == settings.llm.max_retries + 1
+
+    asyncio.run(run())
+
+
+def test_split_player_outcomes_are_repaired_together_before_commit():
+    """The model must regenerate coherent fields; cleanup never reallocates fragments."""
+
+    async def run():
+        bad = RoundResolution(
+            global_narrative="The dwarves gather by the river.",
+            player_resolutions={
+                "Arxs": "When Arxs asks where they are from,",
+                "Blarblablax": "$the dwarves wave their hands. Blarblablax approaches.",
+            },
+        )
+        good = RoundResolution(
+            global_narrative="The dwarves gather by the river.",
+            player_resolutions={
+                "Arxs": "The dwarves dismiss Arxs's question with a wave of their hands.",
+                "Blarblablax": "Blarblablax joins Arxs beside the dismissive dwarves.",
+            },
+        )
+        responses = iter([bad, good])
+        client = FakeClient(lambda kwargs: next(responses))
+        manager = LLMContextManager(client)
+        result = await manager.generate_resolution(
+            {"Arxs": "Ask the dwarves", "Blarblablax": "Follow Arxs"}, {"Arxs": 45}
+        )
+        assert result.model_dump() == good.model_dump()
+        assert len(manager.history) == 2
+        assert json.loads(manager.history[-1]["content"]) == good.model_dump()
+        assert client.calls[1]["messages"][:-1] == client.calls[0]["messages"]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "Arxs finds $5 in the drawer.",
+        "Arxs waits",
+        "Arxs asks, 'Where are you from?'",
+        "Arxs watches…",
+        "Arxs odottaa.",
+    ],
+)
+def test_boundary_guard_preserves_valid_prose(outcome):
+    """Currency, questions, ellipses and unpunctuated prose are not rewritten."""
+    result = RoundResolution(
+        global_narrative="The cabin is quiet.", player_resolutions={"Arxs": outcome}
+    )
+    LLMContextManager._check_semantics(result, ("Arxs",))
+    assert result.player_resolutions["Arxs"] == outcome
