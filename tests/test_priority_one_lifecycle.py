@@ -44,10 +44,10 @@ class ControlledResolver(FakeResolver):
             if self.after_cancel != "success":
                 raise
 
-    async def generate_initial_state(self):
+    async def generate_scenario_title(self):
         """Gate the initial state generation."""
         await self.gate("initial")
-        return await super().generate_initial_state()
+        return await super().generate_scenario_title()
 
     async def generate_start_state(self, names):
         """Gate the start state generation."""
@@ -181,8 +181,11 @@ def test_failed_plan_pauses_without_unchecked_resolution_and_can_retry(tmp_path)
     asyncio.run(run())
 
 
-def test_failed_resolution_retries_identical_rolls_and_keeps_hidden_checks_private(tmp_path):
+def test_failed_resolution_retries_identical_rolls_and_keeps_hidden_checks_private(
+    tmp_path, caplog
+):
     """Verify a failed resolution retries with the same rolls and keeps hidden checks private."""
+    caplog.set_level("INFO", logger="logic.engine")
 
     async def run():
         engine, sender, resolver = await setup(tmp_path)
@@ -198,6 +201,15 @@ def test_failed_resolution_retries_identical_rolls_and_keeps_hidden_checks_priva
         await engine.wait_for_inference()
         assert resolver.plans == 1
         assert resolver.received_rolls[0] == resolver.received_rolls[1]
+        private_logs = [
+            record.getMessage()
+            for record in caplog.records
+            if "Private guidance checks" in record.getMessage()
+        ]
+        assert len(private_logs) == 2
+        assert "reused=False" in private_logs[0]
+        assert "reused=True" in private_logs[1]
+        assert private_logs[0].split("rolls=")[1] == private_logs[1].split("rolls=")[1]
         assert resolver.received_actions[0] == resolver.received_actions[1]
         assert sender.events_of_type("state_update")[-1].payload["dice_results"] == {}
         text = engine.transcript.path.read_text(encoding="utf-8")
@@ -394,7 +406,7 @@ def test_opening_transcript_includes_private_guidance_but_live_events_do_not(tmp
         content = engine.transcript.path.read_text(encoding="utf-8")
         assert "<h2>Opening scenario</h2>" in content
         assert '<p class="state">A locked gate</p>' in content
-        assert content.index("Opening scenario") < content.index("Opening state")
+        assert content.index("Original scenario prompt") < content.index("Opening scenario")
         assert "PRIVATE_TRIGGER" in content
         assert "PRIVATE_TRIGGER" not in str(sender.events)
         await engine.shutdown()

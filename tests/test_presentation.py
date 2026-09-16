@@ -18,6 +18,11 @@ from logic.presentation import name_resolution
         ("A+B", "A+B: The character waits.", "A+B waits."),
         (r"A\1", "He waits.", r"A\1 waits."),
         ("Arxs", "Arxs says: stay here.", "Arxs says: stay here."),
+        (
+            "Arxs",
+            "[Arxs] He opens the gate.\n\nBeyond it, a path leads into the forest.",
+            "Arxs opens the gate.\n\nBeyond it, a path leads into the forest.",
+        ),
     ],
 )
 def test_name_resolution_is_conservative_and_idempotent(name, text, expected):

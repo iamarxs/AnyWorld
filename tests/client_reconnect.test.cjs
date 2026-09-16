@@ -65,6 +65,7 @@ function browser(localStorage = storage(), sessionStorage = storage()) {
     };
     vm.runInNewContext(source, runtime);
     return {
+        runtime,
         sockets, node, localStorage, sessionStorage, hash: runtime.fallbackSha256,
         async login(name = "Arxs", password = "party-password") {
             node("name-input").value = name;
@@ -193,3 +194,42 @@ for (const value of ["", "abc", "x".repeat(55), "x".repeat(56), "x".repeat(64),
         assert.equal(browser().hash(value), createHash("sha256").update(value).digest("hex"));
     });
 }
+
+test("opening uses generated text and snapshots keep it separate from later rounds", async () => {
+    const tab = await joined();
+    const shown = [];
+    tab.runtime.appendScenario = (text, original = false) => {
+        if (text) shown.push([original ? "original" : "opening", text]);
+    };
+    tab.runtime.appendState = (text, round) => shown.push(["state", text, round]);
+    tab.runtime.startRound = () => {};
+    tab.runtime.syncActions = () => {};
+    tab.runtime.markRoundComplete = () => {};
+    tab.node("log-pane").querySelector = () => null;
+    const snapshot = {
+        state: "AWAITING_PLAYERS", players: [], player_order: [],
+        original_scenario: "Raw host prompt", scenario_state: "Lobby preparation",
+    };
+    tab.runtime.applySnapshot(snapshot);
+    assert.deepEqual(shown, [["original", "Raw host prompt"]]);
+    shown.length = 0;
+    tab.sockets[0].receive("state_update", {
+        global_narrative: "Host the ranger and Player the mage arrive.", player_resolutions: {},
+    });
+    assert.equal(shown.length, 1);
+    assert.equal(shown[0][1], "Host the ranger and Player the mage arrive.");
+    shown.length = 0;
+    tab.runtime.applySnapshot({
+        ...snapshot, state: "ACTIVE_TURN", round_number: 1,
+        opening_scenario: "Generated opening", scenario_state: "Generated opening",
+    });
+    assert.deepEqual(shown, [["original", "Raw host prompt"], ["opening", "Generated opening"]]);
+    shown.length = 0;
+    tab.runtime.applySnapshot({
+        ...snapshot, state: "ACTIVE_TURN", round_number: 3, completed_round_number: 2,
+        opening_scenario: "Generated opening", scenario_state: "Later state",
+    });
+    assert.deepEqual(shown, [
+        ["original", "Raw host prompt"], ["opening", "Generated opening"], ["state", "Later state", 2],
+    ]);
+});

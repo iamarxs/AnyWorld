@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from core.config import settings
-from core.schemas import ContextSummary, DicePlan, RoundResolution, SummaryAudit
+from core.schemas import ContextSummary, DicePlan, RoundResolution, ScenarioTitle, SummaryAudit
 from logic.llm_manager import LLMContextManager, LLMResolutionError
 
 
@@ -47,6 +47,8 @@ class FakeClient:
                         else []
                     ),
                 )
+            elif schema is ScenarioTitle:
+                result = ScenarioTitle(title="The gate")
             elif schema is SummaryAudit:
                 result = SummaryAudit(preserved=True, corrections=[])
             elif issubclass(schema, ContextSummary):
@@ -230,7 +232,7 @@ def test_large_scenario_is_rejected_before_inference():
         manager = LLMContextManager(client)
         manager.set_genesis("城" * 20_000, "private" * 700)
         with pytest.raises(LLMResolutionError):
-            await manager.generate_initial_state()
+            await manager.generate_scenario_title()
         assert not client.calls
 
     asyncio.run(run())
@@ -252,8 +254,9 @@ def test_aggregate_preflight_rejects_without_mutating_memory():
     asyncio.run(run())
 
 
-def test_large_next_action_triggers_summary_and_repeated_memory_survives():
+def test_large_next_action_triggers_summary_and_repeated_memory_survives(caplog):
     """Verify a large next action triggers a summary and repeated memory survives."""
+    caplog.set_level("INFO", logger="logic.llm_manager")
 
     async def run():
         client = FakeClient()
@@ -274,6 +277,12 @@ def test_large_next_action_triggers_summary_and_repeated_memory_survives():
         assert len(summaries) == 3
         assert "Durable historical memory" in str(summaries[-1]["messages"])
         assert manager.genesis_state["content"].endswith("invisible alarm.")
+        assert "Context compaction started" in caplog.text
+        assert "Context compaction audit started" in caplog.text
+        assert "Context compaction complete" in caplog.text
+        assert "counting_method=" in caplog.text
+        assert "PRIVATE_TRIGGER" not in caplog.text
+        assert "brass key" not in caplog.text
 
     asyncio.run(run())
 
@@ -291,7 +300,7 @@ def test_large_next_action_triggers_summary_and_repeated_memory_survives():
         ),
     ],
 )
-def test_failed_empty_or_expanding_summary_preserves_original(result):
+def test_failed_empty_or_expanding_summary_preserves_original(result, caplog):
     """Verify a failed, empty or expanding summary preserves the original."""
 
     async def run():
@@ -309,6 +318,8 @@ def test_failed_empty_or_expanding_summary_preserves_original(result):
             )
         assert manager.memory is previous_memory
         assert manager.history is previous_history
+        assert "Context compaction rolled back" in caplog.text
+        assert "PRIVATE failure text" not in caplog.text
 
     asyncio.run(run())
 
@@ -319,7 +330,7 @@ def test_truncation_does_not_enter_history():
     async def run():
         manager = LLMContextManager(FakeClient(finish_reason="length"))
         with pytest.raises(LLMResolutionError, match="token limit"):
-            await manager.generate_initial_state()
+            await manager.generate_scenario_title()
         assert manager.history == []
 
     asyncio.run(run())
@@ -389,7 +400,7 @@ def test_request_timeout_preserves_history():
         client.beta.chat.completions.parse = blocked
         manager = LLMContextManager(client)
         with pytest.raises(LLMResolutionError, match="failed"):
-            await manager.generate_initial_state()
+            await manager.generate_scenario_title()
         assert manager.history == []
 
     asyncio.run(run())

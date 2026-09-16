@@ -43,7 +43,7 @@ def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:
         assert "A &lt;Quest&gt;" in content
         assert "Uses &lt;fire&gt;" in content
         assert "A &lt;cabin&gt; &amp; a river.\nFind a way home." in content
-        assert content.index("Opening scenario") < content.index("Opening state")
+        assert content.index("Original scenario prompt") < content.index("Opening scenario")
         assert content.endswith("</html>\n")
 
     asyncio.run(run())
@@ -64,8 +64,8 @@ def test_private_transcript_sections_escape_content_and_omit_empty_sections(tmp_
         )
         content = transcript.path.read_text(encoding="utf-8")
         assert "Secret &lt;trap&gt; &amp; trigger" in content
-        assert content.index("Opening scenario") < content.index("Private DM guidance")
-        assert content.index("Private DM guidance") < content.index("Opening state")
+        assert content.index("Original scenario prompt") < content.index("Private DM guidance")
+        assert content.index("Private DM guidance") < content.index("Opening scenario")
         assert "&lt;Alice&gt;: 12/100" in content
         assert "Bob: 75/100" in content
         assert content.count("Private checks from DM guidance") == 1

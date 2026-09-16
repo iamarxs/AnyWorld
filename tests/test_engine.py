@@ -41,21 +41,19 @@ class FakeResolver:
         """Initialize the fake resolver state."""
         self.scenario = ""
         self.rounds = 0
+        self.start_names = []
 
     def set_genesis(self, scenario: str, guidance: str = "") -> None:
         """Record the scenario."""
         self.scenario = scenario
 
-    async def generate_initial_state(self) -> RoundResolution:
-        """Return a fixed initial state."""
-        return RoundResolution(
-            round_title="The Test Quest",
-            global_narrative="Two adventurers stand at a gate.",
-            player_resolutions={},
-        )
+    async def generate_scenario_title(self) -> str:
+        """Return only a fixed title."""
+        return "The Test Quest"
 
     async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
         """Return a fixed start state."""
+        self.start_names.append(list(player_names))
         return RoundResolution(
             global_narrative=f"{', '.join(player_names)} stand at a gate.",
             player_resolutions={},
@@ -122,6 +120,8 @@ def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
         engine, sender, resolver = await build_started_game(tmp_path)
         assert engine.state is GameState.ACTIVE_TURN
         assert engine.active_player_id == "host"
+        assert resolver.start_names == [["Host", "Player"]]
+        assert engine.opening_scenario == "Host, Player stand at a gate."
 
         await engine.process_payload("player", payload("action", action="Runs ahead"))
         assert sender.events_of_type("error")[-1].payload["msg"] == "It is not your turn."
@@ -132,6 +132,9 @@ def test_full_round_is_strict_and_logged(tmp_path: Path) -> None:
         await engine.wait_for_inference()
 
         assert resolver.rounds == 1
+        snapshot = engine._snapshot_locked(engine.players["player"])
+        assert snapshot["opening_scenario"] == "Host, Player stand at a gate."
+        assert snapshot["scenario_state"] == "State after round 1."
         assert engine.round_counter == 1
         assert engine.state is GameState.ACTIVE_TURN
         assert engine.active_player_id == "host"
@@ -174,13 +177,18 @@ def test_scenario_title_is_generated_before_game_start(tmp_path: Path) -> None:
         ready = sender.events_of_type("scenario_ready")[-1]
         assert ready.payload["title"] == "The Test Quest"
         assert engine.scenario_title == "The Test Quest"
-        assert engine.current_scenario_state == "Two adventurers stand at a gate."
+        assert engine.current_scenario_state is None
+        assert resolver.start_names == []
+        assert engine.opening_scenario is None
+        assert not sender.events_of_type("state_update")
 
         await engine.process_payload("host", payload("start_game"))
         await engine.wait_for_inference()
         assert engine.scenario_title == "The Test Quest"
         start_update = sender.events_of_type("state_update")[-1]
         assert start_update.payload["round_title"] == "The Test Quest"
+        assert start_update.payload["global_narrative"] == "Host stand at a gate."
+        assert "original_scenario" not in start_update.payload
 
     asyncio.run(run())
 
@@ -298,5 +306,77 @@ def test_round_without_checks_never_rolls_and_emits_clean_outcomes(tmp_path, mon
         transcript = engine.transcript.path.read_text(encoding="utf-8")
         assert "<dt>Host</dt><dd>Sees a journal.</dd>" in transcript
         assert "Dice rolls" not in transcript
+
+    asyncio.run(run())
+
+
+def test_title_then_opening_are_the_only_lobby_inference_calls(tmp_path):
+    """Joining players never generates or receives narrative before the host starts."""
+    from core.schemas import ScenarioTitle
+    from logic.llm_manager import LLMContextManager
+    from test_priority_one_llm import FakeClient
+
+    async def run():
+        opening = "Host the ranger and Player the mage approach the ivy-covered gate."
+
+        def respond(request):
+            if request["response_format"] is ScenarioTitle:
+                return ScenarioTitle(title="The Ivy Gate")
+            return RoundResolution(global_narrative=opening, player_resolutions={})
+
+        client = FakeClient(respond)
+        manager = LLMContextManager(client)
+        sender = FakeSender()
+        engine = GameEngine(sender, manager)
+        engine.transcript = GameTranscript(tmp_path / "logs")
+        await engine.process_payload(
+            "host",
+            payload(
+                "auth",
+                name="Host",
+                password_digest=password_digest(settings.server.host_password, "host"),
+            ),
+        )
+        await engine.process_payload(
+            "host", payload("scenario_init", scenario="A gate blocks the road.")
+        )
+        await engine.wait_for_inference()
+        assert engine.state is GameState.AWAITING_PLAYERS
+        assert len(client.calls) == 1
+        assert client.calls[0]["response_format"] is ScenarioTitle
+        assert set(ScenarioTitle.model_json_schema()["properties"]) == {"title"}
+        assert manager.history == []
+        assert engine.current_scenario_state is None
+        assert engine.transcript.path is None
+        await engine.process_payload(
+            "player",
+            payload(
+                "auth",
+                name="Player",
+                password_digest=password_digest(settings.server.player_password, "player"),
+            ),
+        )
+        assert len(client.calls) == 1
+        snapshot = sender.events_of_type("auth_ok")[-1].payload
+        assert snapshot["scenario_title"] == "The Ivy Gate"
+        assert snapshot["opening_scenario"] is None
+        assert snapshot["scenario_state"] is None
+        assert snapshot["original_scenario"] == "A gate blocks the road."
+        assert not sender.events_of_type("state_update")
+        await engine.process_payload("host", payload("start_game"))
+        await engine.wait_for_inference()
+        assert len(client.calls) == 2
+        prompt = client.calls[1]["messages"][-1]["content"]
+        assert "Host, Player" in prompt
+        assert "occupation, class, role" in prompt
+        assert any("A gate blocks the road." in m["content"] for m in client.calls[1]["messages"])
+        assert engine.state is GameState.ACTIVE_TURN
+        updates = sender.events_of_type("state_update")
+        assert len(updates) == 1
+        assert updates[0].payload["global_narrative"] == opening
+        content = engine.transcript.path.read_text(encoding="utf-8")
+        assert 'Original scenario prompt</h2>\n<p class="state">A gate blocks the road.' in content
+        assert f'Opening scenario</h2>\n<p class="state">{opening}' in content
+        await engine.shutdown()
 
     asyncio.run(run())
