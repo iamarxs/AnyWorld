@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from core.config import settings
-from core.schemas import DicePlan, RoundResolution, SummaryAudit
+from core.schemas import DicePlan, RoundResolution, ScenarioTitle, SummaryAudit
 from logic.llm_manager import LLMContextManager, LLMResolutionError, participant_schema
 from test_priority_one_llm import FakeClient, memory
 
@@ -61,13 +61,9 @@ def test_initial_title_is_required_and_opening_has_no_outcomes():
     """Opening contracts are checked before remembering setup."""
 
     async def run():
-        manager = LLMContextManager(
-            FakeClient(
-                RoundResolution(round_title=" ", global_narrative="A gate", player_resolutions={})
-            )
-        )
+        manager = LLMContextManager(FakeClient(ScenarioTitle(title=" ")))
         with pytest.raises(LLMResolutionError):
-            await manager.generate_initial_state()
+            await manager.generate_scenario_title()
         assert not manager.history
         schema = participant_schema(RoundResolution, ()).model_json_schema()
         assert schema["properties"]["player_resolutions"]["additionalProperties"] is False
@@ -362,3 +358,23 @@ def test_boundary_guard_preserves_valid_prose(outcome):
     )
     LLMContextManager._check_semantics(result, ("Arxs",))
     assert result.player_resolutions["Arxs"] == outcome
+
+
+def test_opening_without_all_player_names_is_rejected_before_remembering():
+    """A generic scenario cannot silently replace the party's introductions."""
+
+    async def run():
+        client = FakeClient(
+            RoundResolution(
+                global_narrative="Alice the ranger approaches a gate.", player_resolutions={}
+            )
+        )
+        manager = LLMContextManager(client)
+        manager.set_genesis("A gate blocks the road.")
+        with pytest.raises(LLMResolutionError, match="introduce every player"):
+            await manager.generate_start_state(["Alice", "Bob"])
+        assert manager.history == []
+        assert len(client.calls) == 2
+        assert "Bob" in client.calls[-1]["messages"][-1]["content"]
+
+    asyncio.run(run())

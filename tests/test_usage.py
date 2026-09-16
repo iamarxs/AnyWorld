@@ -38,7 +38,7 @@ def test_compacting_round_counts_all_calls_and_host_retry(caplog):
         client = MeteredClient()
         manager = LLMContextManager(client)
         manager.set_genesis("A gate.", "PRIVATE_TRIGGER guards the key.")
-        await manager.generate_initial_state()
+        await manager.generate_scenario_title()
         manager.begin_round_usage(1)
         await manager.plan_dice({"Alice": "Wait."})
         manager.history = [
@@ -88,7 +88,7 @@ def test_transient_retry_and_unknown_counters():
         client.beta.chat.completions.parse = flaky
         manager = LLMContextManager(client)
         manager.begin_round_usage(1)
-        await manager.generate_initial_state()
+        await manager.generate_scenario_title()
         usage = manager.usage_snapshot()["round"]
         assert (usage["attempts"], usage["errors"], usage["retries"]) == (2, 1, 1)
         assert usage["total_tokens"] is None
@@ -107,9 +107,9 @@ def test_response_usage_survives_output_failure(truncated):
         manager = LLMContextManager(MeteredClient(finish_reason="length" if truncated else "stop"))
         if truncated:
             with pytest.raises(LLMResolutionError):
-                await manager.generate_initial_state()
+                await manager.generate_scenario_title()
         else:
-            await manager.generate_initial_state()
+            await manager.generate_scenario_title()
         usage = manager.usage_snapshot()["game"]
         assert usage["total_tokens"] == 120
         assert usage["errors"] == int(truncated)
@@ -130,7 +130,7 @@ def test_cancelled_attempt_is_recorded():
 
         client.beta.chat.completions.parse = blocked
         manager = LLMContextManager(client)
-        task = asyncio.create_task(manager.generate_initial_state())
+        task = asyncio.create_task(manager.generate_scenario_title())
         await entered.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -168,5 +168,64 @@ def test_engine_reports_semantic_failure_and_retains_cost_on_retry(tmp_path, mon
             assert payload["round"]["errors"] == 0
             assert payload["last_round_error"] == "LLMResolutionError"
             assert payload["round_work_seconds"] > 0
+
+    asyncio.run(run())
+
+
+def test_retained_usage_uses_backend_tokens_and_invalidates_stale_measurements():
+    """The display uses tokenized retained text, without schema overhead or byte inflation."""
+    from core.config import settings
+
+    async def run():
+        settings.llm.provider = "compatible"
+        client = FakeClient()
+        manager = LLMContextManager(client)
+        calls = []
+
+        def backend(request):
+            calls.append(request.url.path)
+            if request.url.path == "/props":
+                return httpx.Response(200, json={"default_generation_settings": {"n_ctx": 65536}})
+            if request.url.path == "/apply-template":
+                return httpx.Response(200, json={"prompt": "Rendered retained messages"})
+            return httpx.Response(200, json={"tokens": [1] * 123})
+
+        manager._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
+        manager.set_genesis("A long scenario. " * 1000)
+        await manager.discover_context_window()
+        await manager.refresh_usage()
+        snapshot = manager.usage_snapshot()
+        assert snapshot["retained_context_tokens"] == 123
+        assert snapshot["context_window_size"] == 65536
+        assert snapshot["context_window_source"] == "llama.cpp /props per-slot n_ctx"
+        assert "backend template/tokenizer" in snapshot["counting_method"]
+        assert not client.calls
+        await manager.refresh_usage()
+        assert calls.count("/tokenize") == 1
+        manager.history.append({"role": "assistant", "content": "A new state"})
+        assert "UTF-8" in manager.usage_snapshot()["counting_method"]
+        await manager.refresh_usage()
+        assert calls.count("/tokenize") == 2
+        await manager.close()
+
+    asyncio.run(run())
+
+
+def test_retained_usage_fallback_is_labelled_and_not_clamped():
+    """A failed tokenizer keeps an honest conservative estimate, not a false full meter."""
+    from core.config import settings
+
+    async def run():
+        settings.llm.provider = "compatible"
+        manager = LLMContextManager(FakeClient())
+        manager._http = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(404))
+        )
+        manager.set_genesis("x" * 10000)
+        await manager.refresh_usage()
+        snapshot = manager.usage_snapshot()
+        assert snapshot["retained_context_tokens"] > manager.context_window_size
+        assert "conservative UTF-8 estimate" in snapshot["counting_method"]
+        await manager.close()
 
     asyncio.run(run())
