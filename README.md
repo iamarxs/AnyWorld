@@ -34,6 +34,35 @@ The player limit includes the host. Disconnected players may receive idle action
 can continue. Story quality and consistency depend on the model; the game cannot guarantee
 that it follows every instruction perfectly.
 
+## Private percentage events
+
+In **Additional DM guidance**, give each random event a whole-number percentage (0–100%)
+and say exactly when to check it. Write one rule per line, with one percentage per rule:
+
+- "Add a 2% chance every round that a mysterious stranger appears to help the players."
+- "Add a 20% chance every time a building is entered that it collapses on the player."
+
+An every-round rule gets one check for the whole round, not one per player. A conditional
+rule gets a check for each distinct new occurrence identified by the AI in that round.
+Remaining inside a building does not count as entering again. Specify whether players entering
+together should share one check (the default) or each get their own. Describe the event's
+effects and any limits, such as "only while no stranger is already helping the party".
+Keep conditions concrete and tied to the current actions or established situation; avoid
+chains where one random event must trigger another check in the same round.
+
+Python makes the percentage rolls separately from action dice: 0% never triggers and 100%
+always triggers when the condition occurs. Each new check is independent; a 2% chance does
+not guarantee an event within 50 rounds. Retrying a failed round reuses its results.
+Checks begin with action rounds, not the opening scenario. Rules, rolls, and failed checks
+stay private; players see only observable story consequences. Server logs and private HTML
+transcripts record the checks.
+
+The AI identifies applicable rules and conditions and narrates the result, so those steps
+still depend on model accuracy. A conditional result is used only if its trigger actually
+happens; it cannot force a blocked action to succeed. Use a few short rules (at most 16 event
+checks per round); numerous or long rules may require a larger `dice_output_tokens` setting.
+Malformed or over-budget plans pause the round rather than falling back to invented rolls.
+
 ## Rejoining a game
 
 A disconnected tab tries to reconnect automatically. If you close it, open the same game address

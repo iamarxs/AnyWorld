@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 import re
 
-from core.schemas import RoundResolution
+from core.schemas import ChanceEventResult, RoundResolution
 
 LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
         dice_results: dict[str, int] | None = None,
         player_colors: dict[str, int] | None = None,
         hidden_dice_results: dict[str, int] | None = None,
+        chance_events: list[ChanceEventResult] | None = None,
     ) -> None:
         """Append a resolved round's actions, dice and results."""
         player_colors = player_colors or {}
@@ -103,10 +104,25 @@ dl dt:nth-of-type(8n+7){{color:#a5d6ff}}dl dt:nth-of-type(8n){{color:#ff9bce}}
         private_section = self._render_dice_section(
             hidden_dice_results, title="Private checks from DM guidance"
         )
+        event_section = ""
+        if chance_events:
+            event_items = "".join(
+                f"<dt>{escape(result.event.source_rule)}</dt>"
+                f"<dd>{escape(result.event.occurrence)}: "
+                f"{result.event.chance_percent}% chance; roll {result.roll}/100; "
+                f"{'triggered' if result.occurred else 'not triggered'}"
+                " (conditional events apply only if the trigger occurs).</dd>"
+                for result in chance_events
+            )
+            event_section = (
+                '<div class="dice-rolls"><h3>Private percentage events</h3>'
+                f"<dl>{event_items}</dl></div>"
+            )
         section = f"""<article><h2>Round {number}</h2>
 <h3>Player actions</h3><dl>{actions_html}</dl>
 {dice_section}
 {private_section}
+{event_section}
 <h3>Results</h3><dl>{results_html}</dl><h3>Resulting state</h3>
 <p class="state">{escape(resolution.global_narrative)}</p></article>
 """

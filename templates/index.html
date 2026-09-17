@@ -30,15 +30,15 @@
       <span id="scenario-title">Awaiting scenario initialization...</span>
       <details id="token-usage" hidden>
         <summary aria-label="Show token accounting"><span id="token-chart" role="img"
-          aria-label="Estimated retained context"></span><span id="token-count"></span></summary>
+            aria-label="Estimated retained context"></span><span id="token-count"></span></summary>
         <div id="token-details"></div>
       </details>
       <span id="player-identity" aria-label="Current player"></span>
     </header>
     <section id="log-pane" data-pane-title="Game State" aria-label="Game state: scenario state and player actions"
       aria-live="polite">
-      <img id="game-banner" src="/static/media/AnyworldBanner.jpg" alt="Anyworld"
-        width="1376" height="322" fetchpriority="high">
+      <img id="game-banner" src="/static/media/AnyworldBanner.jpg" alt="Anyworld" width="1376" height="322"
+        fetchpriority="high">
     </section>
     <form id="input-pane">
       <input type="text" id="action-input" maxlength="4000" disabled autocomplete="off"
@@ -67,8 +67,14 @@
           <label for="scenario-input">Describe the setting, characters, and opening situation</label>
           <textarea id="scenario-input" maxlength="20000" required></textarea>
           <label for="guidance-input">Additional DM guidance (optional)</label>
-          <textarea id="guidance-input" maxlength="5000"
-            placeholder="Example: Include a small possibility of something extremely random happening whenever players act."></textarea>
+          <textarea id="guidance-input" maxlength="5000" aria-describedby="guidance-tips"
+            placeholder="Example: Add a 2% chance every round that a mysterious stranger appears to help the players."></textarea>
+          <p id="guidance-tips">For private random events, write one rule per line with a whole-number
+            chance (0–100%) and a trigger: “every round” or “every time [action happens]”.
+            Example: “Add a 20% chance every time a building is entered that it collapses on the player.”
+            Every-round checks happen once per round; conditional checks happen for each new occurrence,
+            not while the condition merely continues. Specify any limits or whether to check per player.
+            Python rolls the chance; the AI interprets the trigger.</p>
           <button type="submit">Generate scenario</button>
         </form>
       </section>

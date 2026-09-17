@@ -5,7 +5,7 @@ import secrets
 from enum import Enum, auto
 from typing import Any, Protocol
 
-from core.schemas import DicePlan, RoundResolution, ServerEvent
+from core.schemas import ChanceEventResult, DicePlan, RoundResolution, ServerEvent
 
 
 class GameState(Enum):
@@ -90,6 +90,7 @@ class ResolutionManager(Protocol):
         round_buffer: dict[str, str],
         dice_results: dict[str, int] | None = None,
         hidden_rolls: set[str] | None = None,
+        chance_events: list[ChanceEventResult] | None = None,
     ) -> RoundResolution:
         """Resolve a round of actions."""
         ...

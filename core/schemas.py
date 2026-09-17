@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
@@ -41,11 +41,29 @@ class ServerEvent(StrictModel):
     payload: dict[str, Any]
 
 
+class ChanceEvent(StrictModel):
+    """One applicable occurrence of a percentage rule from private guidance."""
+
+    source_rule: str = Field(min_length=1, max_length=1_000)
+    trigger: Literal["per_round", "condition"]
+    occurrence: str = Field(min_length=1, max_length=240)
+    chance_percent: int = Field(ge=0, le=100)
+
+
+class ChanceEventResult(StrictModel):
+    """Private authoritative event outcome, separate from action-quality dice."""
+
+    event: ChanceEvent
+    roll: int = Field(ge=1, le=100)
+    occurred: bool
+
+
 class DicePlan(StrictModel):
     """LLM-selected checks; hidden names are never disclosed to clients."""
 
     rolls: dict[str, bool]
     hidden_rolls: list[str]
+    chance_events: list[ChanceEvent] = Field(default_factory=list, max_length=16)
 
 
 class ContextSummary(StrictModel):

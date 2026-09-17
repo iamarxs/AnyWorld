@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 
 from core.config import settings
 from core.schemas import ServerEvent
-from logic.dice import roll_d100
+from logic.dice import roll_chance, roll_d100, validate_chance_events
 from logic.llm_manager import LLMBackendUnavailableError, LLMResolutionError
 from logic.lobby import CURRENT_OWNER, LobbyMixin
 from logic.models import EventSender, GameState, Player, ResolutionManager
@@ -266,7 +266,11 @@ class GameEngine(LobbyMixin):
                 actions = self._take_complete_round_locked()
                 if actions is not None:
                     self._launch_round_locked(actions)
-            LOGGER.info("Player action accepted round=%d", action_event.payload["round_number"])
+            LOGGER.info(
+                "Player action accepted round=%d player=%s",
+                action_event.payload["round_number"],
+                action_event.payload["player_name"],
+            )
             await self.sender.broadcast_global(action_event)
             if directive is not None:
                 await self.sender.broadcast_global(directive)
@@ -337,6 +341,7 @@ class GameEngine(LobbyMixin):
                 "participants": participants,
                 "dice": None,
                 "hidden": set(),
+                "chance_events": [],
                 "previous_state": self.current_scenario_state or "",
             }
         self._launch_job_locked(self._resolve_round, GameState.AWAITING_LLM)
@@ -399,7 +404,14 @@ class GameEngine(LobbyMixin):
                     name for name, required in plan.rolls.items() if required
                 }:
                     raise LLMResolutionError("Invalid dice plan participants.")
+                try:
+                    chance_events = validate_chance_events(
+                        plan.chance_events, self.private_guidance
+                    )
+                except ValueError as exc:
+                    raise LLMResolutionError(str(exc)) from exc
                 pending["hidden"] = set(plan.hidden_rolls)
+                pending["chance_events"] = [roll_chance(event) for event in chance_events]
                 pending["dice"] = {
                     name: roll_d100() for name, required in plan.rolls.items() if required
                 }
@@ -414,11 +426,22 @@ class GameEngine(LobbyMixin):
                     ensure_ascii=True,
                 ),
             )
+        if pending["chance_events"]:
+            LOGGER.info(
+                "Private chance events round=%d generation=%d reused=%s results=%s",
+                self.round_counter + 1,
+                epoch,
+                reused_dice,
+                json.dumps([result.model_dump() for result in pending["chance_events"]]),
+            )
         if plan_dice is None:
             resolution = await self.resolver.generate_resolution(llm_actions)
         else:
             resolution = await self.resolver.generate_resolution(
-                llm_actions, pending["dice"], hidden_rolls=pending["hidden"]
+                llm_actions,
+                pending["dice"],
+                hidden_rolls=pending["hidden"],
+                **({"chance_events": pending["chance_events"]} if pending["chance_events"] else {}),
             )
         if (
             set(resolution.player_resolutions) != set(llm_actions)
@@ -473,6 +496,7 @@ class GameEngine(LobbyMixin):
                         for name, value in pending["dice"].items()
                         if name in pending["hidden"]
                     },
+                    chance_events=pending["chance_events"],
                 )
             except OSError:
                 LOGGER.warning("Could not append round %s to transcript", number)
