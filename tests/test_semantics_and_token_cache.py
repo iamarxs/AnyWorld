@@ -74,6 +74,9 @@ def test_initial_title_is_required_and_opening_has_no_outcomes():
 def test_validated_raw_response_retains_spacing_but_normalization_is_consistent():
     """Keep the exact generated prefix when safe; normalize once before remembering."""
 
+    # Leave room for two full round prompts; this fake does not implement compaction.
+    settings.llm.context_window_size = 16_384
+
     async def run():
         client = FakeClient()
         original_parse = client.parse
