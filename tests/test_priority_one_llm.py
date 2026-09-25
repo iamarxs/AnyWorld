@@ -31,6 +31,8 @@ class FakeClient:
         result = self.result
         if callable(result):
             result = result(kwargs)
+        elif isinstance(result, DicePlan) and kwargs["response_format"] is SummaryAudit:
+            result = SummaryAudit(preserved=True, corrections=[])
         if isinstance(result, Exception):
             raise result
         if result is None:
@@ -39,13 +41,7 @@ class FakeClient:
                 names = schema.model_json_schema()["properties"]["rolls"].get("required", ["Alice"])
                 result = DicePlan(
                     rolls={name: True for name in names},
-                    hidden_rolls=(
-                        names
-                        if schema.model_json_schema()["properties"]["hidden_rolls"].get(
-                            "maxItems", 1
-                        )
-                        else []
-                    ),
+                    hidden_rolls=[],
                 )
             elif schema is ScenarioTitle:
                 result = ScenarioTitle(title="The gate")
@@ -340,7 +336,13 @@ def test_planner_sees_private_guidance_durable_facts_and_recent_changes():
     """Verify the planner sees private guidance, durable facts and recent changes."""
 
     async def run():
-        client = FakeClient()
+        client = FakeClient(
+            DicePlan(
+                rolls={"Alice": True},
+                hidden_rolls=["Alice"],
+                hidden_roll_sources={"Alice": "PRIVATE_TRIGGER: invisible alarm at gate"},
+            )
+        )
         manager = LLMContextManager(client)
         manager.set_genesis("North gate", "PRIVATE_TRIGGER: invisible alarm at gate")
         manager.memory = {"role": "user", "content": memory().model_dump_json()}
@@ -360,6 +362,7 @@ def test_planner_sees_private_guidance_durable_facts_and_recent_changes():
         ]:
             assert fact in text
         assert len(manager.history) == 2
+        client.result = None
         await manager.generate_resolution(
             {"Alice": "open gate"}, {"Alice": 17}, hidden_rolls=set(plan.hidden_rolls)
         )
