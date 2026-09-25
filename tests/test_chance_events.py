@@ -342,6 +342,36 @@ def test_occurrences_are_the_single_source_of_chance_rolls():
     assert dice.chance_events_from_decisions(decisions, RULE) == []
 
 
+def test_explicit_per_turn_rules_are_authoritative_when_model_omits_occurrences():
+    """A model cannot suppress unconditional percentage events by misclassifying them."""
+    guidance = "\n".join(
+        [
+            "Add a 40% chance per turn that dwarves intervene.",
+            "Add a 60% chance per turn that a voice narrates the scene.",
+            "Add a 50% chance per turn that one player's clothing changes.",
+        ]
+    )
+    decisions = {
+        f"rule-{index}": ChanceRuleDecision(
+            trigger="condition", occurrences=[], reason="No conditional trigger occurred."
+        )
+        for index in range(1, 4)
+    }
+
+    events = dice.chance_events_from_decisions(decisions, guidance)
+
+    assert [(event.trigger, event.occurrence, event.chance_percent) for event in events] == [
+        ("per_round", "round", 40),
+        ("per_round", "round", 60),
+        ("per_round", "round", 50),
+    ]
+
+
+def test_percentage_only_guidance_cannot_enable_hidden_action_rolls():
+    assert not dice.has_non_percentage_private_guidance(RULE)
+    assert dice.has_non_percentage_private_guidance(RULE + "\nThe gate has an invisible alarm.")
+
+
 def test_plan_audit_repairs_skipped_spell_triggers_alongside_every_round_event():
     """Audit runs even when a conditional rule incorrectly claims no occurrences."""
 
@@ -563,6 +593,48 @@ def test_successful_event_omission_is_repaired_or_paused_before_remembering(repa
             assert '"roll": 30' in text and '"occurred": true' in text
         assert client.calls[1]["max_completion_tokens"] == settings.llm.summary_output_tokens
         assert "same event results" in client.calls[2]["messages"][-1]["content"]
+        await manager.close()
+
+    asyncio.run(run())
+
+
+def test_nonblocking_event_prompt_preserves_the_original_action():
+    async def run():
+        settings.llm.context_window_size = 32_768
+        rule = "Include a 50% chance one player's clothes change every round."
+        check = ChanceEventResult(
+            event=event(
+                source_rule=rule, chance_percent=50, trigger="per_round", occurrence="round"
+            ),
+            roll=1,
+            occurred=True,
+        )
+        resolution = RoundResolution(
+            global_narrative="The window reveals a moonlit courtyard.",
+            player_resolutions={
+                "Host": (
+                    "Host's clothing changes into a velvet robe, and Host looks out the "
+                    "window to see the courtyard."
+                )
+            },
+        )
+
+        def response(kwargs):
+            return (
+                SummaryAudit(preserved=True, corrections=[])
+                if kwargs["response_format"] is SummaryAudit
+                else resolution
+            )
+
+        client = FakeClient(response)
+        manager = LLMContextManager(client)
+        manager.set_genesis("A tower", rule)
+        await manager.generate_resolution(
+            {"Host": "Look outside the window"}, chance_events=[check]
+        )
+        prompt = client.calls[0]["messages"][-1]["content"]
+        assert "Chance effects are modifiers, not replacements for player actions" in prompt
+        assert "does not stop them from looking out a window" in prompt
         await manager.close()
 
     asyncio.run(run())

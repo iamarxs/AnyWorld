@@ -34,7 +34,13 @@ from core.schemas import (
     SummaryAudit,
 )
 from logic.usage import UsageTotals, counter
-from logic.dice import chance_events_from_decisions, describe_roll, private_chance_rules
+from logic.dice import (
+    chance_events_from_decisions,
+    describe_roll,
+    has_non_percentage_private_guidance,
+    normalize_chance_rule_decisions,
+    private_chance_rules,
+)
 from logic.presentation import name_resolution
 from logic.debug_log import RawResponseLogger
 
@@ -349,7 +355,9 @@ class LLMContextManager:
                 "keyed by rule ID, with trigger, occurrences and a factual reason. Return "
                 "chance_events=[]; Python builds and rolls events from these decisions using "
                 "the host's percentages. For unconditional every-round rules use per_round; "
-                "Python makes exactly one check for the whole round. For conditional rules use "
+                "including rules phrased as per turn, Python makes exactly one check for the "
+                "whole round even if the model initially mislabels or omits the occurrence. "
+                "For conditional rules use "
                 "condition and list ALL new occurrences with players and locations. An empty "
                 "list means the condition was unmet; explain why. Do not select just one rule "
                 "or omit conditional checks because an every-round rule applies. All applicable "
@@ -371,7 +379,7 @@ class LLMContextManager:
             participant_schema(
                 DicePlan,
                 tuple(round_buffer),
-                bool(self.private_guidance),
+                has_non_percentage_private_guidance(self.private_guidance),
                 tuple(private_chance_rules(self.private_guidance)),
                 settings.llm.provider,
             ),
@@ -436,10 +444,17 @@ class LLMContextManager:
                 "resolution or global_narrative; duplication across fields is not required. "
                 "Keep both fields consistent, and reflect consequences in the shared state "
                 "when they change the wider scene or other players' possible actions. "
+                "Chance effects are modifiers, not replacements for player actions. Resolve "
+                "each supplied action as well as any successful event. If an event does not "
+                "physically prevent the action, the action still happens; changing a player's "
+                "clothing does not stop them from looking out a window, opening an object, or "
+                "otherwise completing that action. If an event genuinely blocks the action, "
+                "describe the blocking consequence explicitly. "
                 "If a rule targets one unspecified player, "
                 "choose one eligible participant and name them consistently. For example, a "
                 "successful clothing-transformation event must describe that player's clothes "
-                "becoming the specified costume, not merely continue their ordinary action."
+                "becoming the specified costume while still resolving that player's ordinary "
+                "action when the clothing change is not an obstruction."
             )
         elif self.private_guidance:
             roll_context += (
@@ -478,6 +493,8 @@ class LLMContextManager:
                 "consequences to individual outcomes or contradict them in global_narrative. "
                 "Preserve earlier changes unless current events alter them. If the environment "
                 "is unchanged, describe its relevant continuing state without inventing changes. "
+                "A successful chance event is additive unless it physically prevents an action; "
+                "do not replace a player's requested action with the event's consequence. "
                 "\n\nCurrent round actions:\n"
                 f"{actions}{roll_context}\nRequired player_resolutions keys: "
                 + json.dumps(list(round_buffer), ensure_ascii=False)
@@ -692,12 +709,15 @@ class LLMContextManager:
                 self._check_semantics(result, expected_names, title_required)
                 if isinstance(result, DicePlan):
                     try:
+                        decisions = normalize_chance_rule_decisions(
+                            result.chance_rule_decisions, self.private_guidance
+                        )
                         result = result.model_copy(
                             update={
+                                "chance_rule_decisions": decisions,
                                 "chance_events": chance_events_from_decisions(
-                                    result.chance_rule_decisions,
-                                    self.private_guidance,
-                                )
+                                    decisions, self.private_guidance
+                                ),
                             }
                         )
                     except ValueError as exc:
@@ -885,7 +905,11 @@ class LLMContextManager:
                     "An unspecified single-player target must be selected "
                     "from the participants. Hiding private mechanics does not justify omitting "
                     "observable effects. Failed checks must not cause their event. Reject vague "
-                    "hints or promises of later effects in place of the required event. If any "
+                    "hints or promises of later effects in place of the required event. Also "
+                    "resolve every supplied player action. A successful event is additive "
+                    "unless it physically prevents that action: a clothing transformation "
+                    "does not prevent looking out a window, so the affected player's outcome "
+                    "must include both the clothing change and what they observed. If any "
                     "requirement is missed, set preserved=false and give specific corrections. "
                     "This audit is private; return only the requested audit object.\n\n"
                     "Proposed round:\n" + result.model_dump_json()

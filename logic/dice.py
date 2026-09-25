@@ -16,6 +16,50 @@ def private_chance_rules(guidance: str) -> dict[str, tuple[str, int]]:
     return rules
 
 
+def _is_per_round_rule(instruction: str) -> bool:
+    """Return whether a rule explicitly requests one check on every turn/round."""
+    return bool(
+        re.search(
+            r"\b(?:per|each|every)\s+(?:single\s+)?(?:turn|round)s?\b",
+            instruction,
+            re.IGNORECASE,
+        )
+    )
+
+
+def has_non_percentage_private_guidance(guidance: str) -> bool:
+    """Return whether guidance contains a possible private cause beyond chance rules."""
+    chance_lines = {instruction for instruction, _ in private_chance_rules(guidance).values()}
+    return any(line.strip() and line.strip() not in chance_lines for line in guidance.splitlines())
+
+
+def normalize_chance_rule_decisions(
+    decisions: dict[str, ChanceRuleDecision], guidance: str
+) -> dict[str, ChanceRuleDecision]:
+    """Make explicit every-turn/round cadence authoritative after model parsing."""
+    rules = private_chance_rules(guidance)
+    if set(decisions) != set(rules):
+        raise ValueError(
+            "Chance plan must account for every private rule in chance_rule_decisions: "
+            + ", ".join(rules)
+            + ". Do not omit earlier rows or stop after selecting one rule."
+        )
+    normalized = {}
+    for rule_id, (instruction, _) in rules.items():
+        decision = decisions[rule_id]
+        if _is_per_round_rule(instruction):
+            normalized[rule_id] = decision.model_copy(
+                update={
+                    "trigger": "per_round",
+                    "occurrences": ["round"],
+                    "reason": "The private rule explicitly applies once every round.",
+                }
+            )
+        else:
+            normalized[rule_id] = decision
+    return normalized
+
+
 def validate_chance_events(
     events: list[ChanceEvent],
     guidance: str,
@@ -61,12 +105,7 @@ def chance_events_from_decisions(
 ) -> list[ChanceEvent]:
     """Build every roll from per-rule occurrences, without a second applicability flag."""
     rules = private_chance_rules(guidance)
-    if set(decisions) != set(rules):
-        raise ValueError(
-            "Chance plan must account for every private rule in chance_rule_decisions: "
-            + ", ".join(rules)
-            + ". Do not omit earlier rows or stop after selecting one rule."
-        )
+    decisions = normalize_chance_rule_decisions(decisions, guidance)
     events = []
     for rule_id, (_, percentage) in rules.items():
         decision = decisions[rule_id]
