@@ -68,13 +68,19 @@
           <textarea id="scenario-input" maxlength="20000" required></textarea>
           <label for="guidance-input">Additional DM guidance (optional)</label>
           <textarea id="guidance-input" maxlength="5000" aria-describedby="guidance-tips"
-            placeholder="Example: Add a 2% chance every round that a mysterious stranger appears to help the players."></textarea>
-          <p id="guidance-tips">For private random events, write one rule per line with a whole-number
-            chance (0–100%) and a trigger: “every round” or “every time [action happens]”.
-            Example: “Add a 20% chance every time a building is entered that it collapses on the player.”
-            Every-round checks happen once per round; conditional checks happen for each new occurrence,
-            not while the condition merely continues. Specify any limits or whether to check per player.
-            Python rolls the chance; the AI interprets the trigger.</p>
+            placeholder="Example: 'Add a 2% chance every round that a stranger appears' or 'The tone is gothic horror.'"></textarea>
+          <div id="guidance-tips">
+            Each line can be either a random event or narrative guidance:
+            <ul>
+              <li><strong>Random Events:</strong> Define a chance (0–100%) and a trigger. <em>Example: "Add a 10% chance
+                  every round that a thief appears."</em></li>
+              <li><strong>Narrative Guidance:</strong> Instructions to steer the AI's style, tone, or direction.
+                <em>Example: "The setting is gothic.", or "Steer responses toward the absurd, as if the scenario
+                  happened in a universe that does not conform to basic logic."</em></li>
+            </ul>
+            Each instruction is processed on its own line. Python rolls the chance for events; the AI follows the
+            narrative guidance to shape the story.
+          </div>
           <button type="submit">Generate scenario</button>
         </form>
       </section>
