@@ -6,8 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from core.config import ConfigLoadError, Settings
-from core.schemas import ClientPayload, RoundResolution
-from logic.llm_manager import LLMContextManager, LLMResolutionError
+from core.schemas import ClientPayload, DicePlan, RoundResolution
+from logic.llm_manager import LLMContextManager, LLMResolutionError, participant_schema
 
 
 def test_settings_loads_typed_yaml(tmp_path: Path) -> None:
@@ -35,6 +35,34 @@ llm:
 
     assert loaded.server.port == 9000
     assert loaded.llm.context_window_size == 4096
+
+
+def test_openai_api_key_comes_from_environment(tmp_path: Path, monkeypatch) -> None:
+    """Use OPENAI_API_KEY for the direct provider without requiring it in YAML."""
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        """
+llm:
+    provider: "openai"
+    model_name: "gpt-5.6-luna"
+    system_prompt: "Direct the game."
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
+
+    loaded = Settings.load(config)
+
+    assert loaded.llm.api_key == "test-secret"
+
+
+def test_openai_schema_omits_unsupported_strict_keywords() -> None:
+    """Keep provider-specific schema limits out of OpenAI's strict response schema."""
+    schema = participant_schema(DicePlan, ("Alice",), provider="openai").model_json_schema()
+    rendered = str(schema)
+
+    assert "uniqueItems" not in rendered
+    assert "maxItems" not in rendered
 
 
 def test_settings_reports_malformed_yaml(tmp_path: Path) -> None:

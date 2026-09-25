@@ -13,3 +13,4 @@ certs/key.pem
 pytest-output.txt
 .debug/
 benchmarks/
+.env

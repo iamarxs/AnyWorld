@@ -77,11 +77,52 @@ llm:
     guidance secret. Return only the requested structured object.
 ```
 
-Set `provider` to `compatible` for a local OpenAI-compatible backend (the default), or to
-`openai` to connect directly to OpenAI (not yet tested live in this project).
-For direct OpenAI use, set `api_key` to your OpenAI API key and set `model_name` to the OpenAI
-model you want to use; `endpoint` is ignored. For local backends, `endpoint` must support
-OpenAI-compatible structured chat completion parsing.
+### Switching between local llama.cpp and OpenAI
+
+The default is the local llama.cpp-compatible backend:
+
+```yaml
+llm:
+  provider: "compatible"
+  endpoint: "http://localhost:8033/v1"
+  model_name: "local"
+  api_key: "sk-no-key-required"
+```
+
+Start the local model server before starting Anyworld. Its endpoint must support OpenAI-compatible
+structured chat completion parsing. Anyworld uses llama.cpp `/props`, `/apply-template`, and
+`/tokenize` endpoints when available.
+
+To use OpenAI directly, create a `.env` file in the repository root:
+
+```dotenv
+OPENAI_API_KEY=your-api-key-here
+```
+
+Keep `.env` private. Anyworld loads `OPENAI_API_KEY` with `python-dotenv` when the provider is
+`openai`; the key does not need to be written into `config.yaml` and is never printed in normal
+logs. Then change the LLM section to:
+
+```yaml
+llm:
+  provider: "openai"
+  model_name: "gpt-5.6-luna"
+  context_window_size: 1050000
+  tokenizer_encoding: "cl100k_base"
+  endpoint: "http://localhost:8033/v1" # ignored for provider: openai
+  api_key: "sk-no-key-required"          # ignored when OPENAI_API_KEY is set
+```
+
+Direct OpenAI support has been tested live with `gpt-5.6-luna`, including scenario titles,
+opening-state generation, dice planning, and round resolution. The model's documented context
+window is approximately 1.05 million tokens; see the [GPT-5.6 Luna model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
+OpenAI token counters are reported separately from the retained-context indicator; the latter is
+not total game consumption.
+
+To switch back, restore `provider: "compatible"`, the local endpoint, and the local model name.
+The `.env` file may remain in place; its key is only used when `provider: "openai"` is selected.
+
+For local backends, `endpoint` must support OpenAI-compatible structured chat completion parsing.
 `context_window_size` is an optional fallback value. When using a compatible backend, Anyworld
 still attempts to read the context size from the llama.cpp `/props` endpoint even when a value is
 configured. A successful discovery takes precedence; if discovery is unavailable, the configured
@@ -167,8 +208,8 @@ The title-only request uses at most 128 output tokens (or the initial output cap
 ## Run
 
 For `provider: compatible`, start your model server first. Development has used llama.cpp;
-compatibility with other servers depends on their structured-response support. Direct OpenAI
-support exists but has not been tested live in this project. Run from the repository root:
+compatibility with other servers depends on their structured-response support. For
+`provider: openai`, ensure `.env` contains `OPENAI_API_KEY`. Run from the repository root:
 
 ```bash
 python app.py

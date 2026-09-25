@@ -5,11 +5,16 @@ import os
 from typing import Any, Literal
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+
+# Load local secrets before settings are created, without overwriting variables supplied
+# by the process environment. The key is consumed below only for the direct OpenAI provider.
+load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
 class ConfigLoadError(ValueError):
@@ -108,6 +113,12 @@ class Settings(BaseSettings):
             raw_data = {}
         if not isinstance(raw_data, dict):
             raise ConfigLoadError(f"Configuration root must be a mapping: {config_path}")
+
+        llm_data = raw_data.get("llm")
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        if isinstance(llm_data, dict) and llm_data.get("provider") == "openai" and openai_api_key:
+            # Keep the secret in memory only; never include it in config diagnostics/logs.
+            llm_data["api_key"] = openai_api_key
         return cls.model_validate(raw_data)
 
 

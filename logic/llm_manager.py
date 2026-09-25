@@ -55,6 +55,7 @@ def participant_schema(
     names: tuple[str, ...],
     allow_hidden: bool = False,
     chance_rule_ids: tuple[str, ...] = (),
+    provider: str = "compatible",
 ) -> type[BaseModel]:
     """Constrain generated object keys to the actual party, including empty openings."""
     field = (
@@ -114,7 +115,7 @@ def participant_schema(
                         {"type": "string", "enum": list(names)} if names else {"type": "string"}
                     ),
                     "maxItems": len(names) if allow_hidden else 0,
-                    "uniqueItems": True,
+                    **({} if provider == "openai" else {"uniqueItems": True}),
                 }
             ),
         )
@@ -123,7 +124,40 @@ def participant_schema(
         fields["round_title"] = (str | None, Field(default=None, json_schema_extra={"const": None}))
     elif base is ContextSummary:
         fields["world_state"] = (str, Field(min_length=1))
-    return create_model(base.__name__, __base__=base, **fields)
+    schema = create_model(base.__name__, __base__=base, **fields)
+    if provider == "openai":
+        original_model_json_schema = schema.model_json_schema
+
+        @classmethod
+        def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            """Remove JSON Schema keywords unsupported by OpenAI strict schemas."""
+            result = original_model_json_schema(*args, **kwargs)
+            unsupported = {
+                "uniqueItems",
+                "minItems",
+                "maxItems",
+                "minLength",
+                "maxLength",
+                "pattern",
+                "format",
+                "minimum",
+                "maximum",
+                "multipleOf",
+            }
+
+            def strip(node: Any) -> Any:
+                if isinstance(node, dict):
+                    return {
+                        key: strip(value) for key, value in node.items() if key not in unsupported
+                    }
+                if isinstance(node, list):
+                    return [strip(value) for value in node]
+                return node
+
+            return strip(result)
+
+        schema.model_json_schema = model_json_schema
+    return schema
 
 
 class LLMContextManager:
@@ -275,7 +309,7 @@ class LLMContextManager:
         }
         return await self._request(
             prompt,
-            participant_schema(RoundResolution, ()),
+            participant_schema(RoundResolution, (), provider=settings.llm.provider),
             remember=True,
             kind="initial",
             expected_names=(),
@@ -339,6 +373,7 @@ class LLMContextManager:
                 tuple(round_buffer),
                 bool(self.private_guidance),
                 tuple(private_chance_rules(self.private_guidance)),
+                settings.llm.provider,
             ),
             remember=False,
             kind="dice",
@@ -452,7 +487,9 @@ class LLMContextManager:
         }
         return await self._request(
             prompt,
-            participant_schema(RoundResolution, tuple(round_buffer)),
+            participant_schema(
+                RoundResolution, tuple(round_buffer), provider=settings.llm.provider
+            ),
             remember=True,
             expected_names=tuple(round_buffer),
             private_rolls={
@@ -1154,7 +1191,9 @@ class LLMContextManager:
         passes = 0
         compacted = False
         summary_schema = (
-            participant_schema(ContextSummary, tuple(self._known_player_names))
+            participant_schema(
+                ContextSummary, tuple(self._known_player_names), provider=settings.llm.provider
+            )
             if self._known_player_names
             else ContextSummary
         )

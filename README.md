@@ -9,11 +9,11 @@ their own words while an AI weaves every choice into a story that keeps unfoldin
 ## Get started
 
 One person runs the game server and connects it to an AI model. Everyone plays in a browser.
-You need Python 3.11 or newer on the server; development has used llama.cpp for the AI.
-Direct OpenAI support is available but has not been tested live in this project.
+You need Python 3.11 or newer on the server. Anyworld supports a local llama.cpp backend and
+direct OpenAI API access; direct OpenAI operation has been tested live with `gpt-5.6-luna`.
 
-See [INSTALL.md](INSTALL.md) for installation, passwords, model settings, network access,
-and troubleshooting. Once installed and configured, run `anyworld` or `python app.py`
+See [INSTALL.md](INSTALL.md) for installation, passwords, model settings, backend switching,
+network access, and troubleshooting. Once installed and configured, run `anyworld` or `python app.py`
 from the repository directory, then open the local game page at https://127.0.0.1:4141/.
 
 ## How to play
