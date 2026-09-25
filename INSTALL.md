@@ -4,7 +4,6 @@
 
 ## Install
 
-
 Clone the repository and change into its directory:
 
 ```bash
@@ -48,7 +47,6 @@ py -3.11 -m venv venv
 ```
 
 ## Configure
-
 
 Edit `config.yaml` in the project directory before launching. Set `host_password` and
 `player_password` to distinct, nonempty passwords; replace any existing example values as well.
@@ -111,11 +109,11 @@ max_retries: 1
 
 Additional optional `llm` settings:
 
-| Setting                      | Default | Behavior                                                                                                                                                                       |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enable_thinking`            | `null`  | Sends `chat_template_kwargs.enable_thinking` only to compatible backends when set. Support depends on the backend/template; the current `config.yaml` sets it to `false`.      |
-| `planner_system_prompt`      | `null`  | Replaces the system prompt for dice planning only. Scenario, private guidance, memory, and recent history are still supplied.                                                  |
-| `compaction_target_fraction` | `0.75`  | After compaction starts, aims to leave the upcoming request within this fraction of the context window. Allowed range: `0.5`–`1.0`.                                            |
+| Setting                      | Default | Behavior                                                                                                                                                                                                                 |
+| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enable_thinking`            | `null`  | Sends `chat_template_kwargs.enable_thinking` only to compatible backends when set. Support depends on the backend/template; the current `config.yaml` sets it to `false`.                                                |
+| `planner_system_prompt`      | `null`  | Replaces the system prompt for dice planning only. Scenario, private guidance, memory, and recent history are still supplied.                                                                                            |
+| `compaction_target_fraction` | `0.75`  | After compaction starts, aims to leave the upcoming request within this fraction of the context window. Allowed range: `0.5`–`1.0`.                                                                                      |
 | `history_round_limit`        | `null`  | Optionally requests earlier memory checkpoints after this many stored request/response pairs, including the generated opening; title generation is not stored. Allowed range: `2`–`100`; this is not a hard history cap. |
 
 Choose caps that leave sufficient input capacity within the effective backend context, especially
@@ -168,7 +166,6 @@ The title-only request uses at most 128 output tokens (or the initial output cap
 
 ## Run
 
-
 For `provider: compatible`, start your model server first. Development has used llama.cpp;
 compatibility with other servers depends on their structured-response support. Direct OpenAI
 support exists but has not been tested live in this project. Run from the repository root:
@@ -188,14 +185,26 @@ Other players connect to `https://<server-IP>:4141/` using the server's LAN addr
 address for internet play. Allow the configured TCP port through the firewall; internet play may
 also require router port forwarding. Remove temporary forwarding when the session ends.
 
-### Development model setup
+### AI model recommendation
 
-Development has used Gemma 4 26B A4B with a 128k context. This is a record of the project's
-setup, not a minimum requirement or a guarantee of story quality. Smaller context limits
-require more frequent summaries; memory checks cannot guarantee perfect recall.
-Sampling settings used during development were temperature 1.0, top-p 0.95, top-k 20,
-min-p 0.0, presence-penalty 0.0, and repeat-penalty 1.0. Configure these in the model server;
-Anyworld does not set them.
+During development, Gemma 4 26B A4B with a 128k context was used as the DM AI.
+This is a record of the project's setup, not a minimum requirement or a guarantee of story quality.
+Smaller context limits require more frequent summaries; memory checks cannot guarantee perfect recall.
+
+**These sampling settings provided a more than adequate game experience with a Q4 quantized Gemma 4:**
+
+```yaml
+temperature: 1.0
+top-p: 0.95
+top-k: 20
+min-p: 0.0
+presence-penalty: 0.0
+repeat-penalty: 1.0
+```
+
+Configure these in the model server; Anyworld does not set them.
+
+Of course, feel free to try out your own models!
 
 ### HTTPS certificates
 
@@ -205,9 +214,20 @@ that detected IP and `127.0.0.1`, last 825 days, and are regenerated at startup 
 within 30 days of expiry, or no longer covering the detected IP. They do not include the
 `localhost` hostname or every LAN address.
 
-Browsers will warn because the certificate is self-signed, and may also report an address
-mismatch when using another address. For a server you recognize and trust, use the browser's
-certificate exception if available, or deploy a trusted certificate/reverse proxy.
+**Browsers will display a warning to joining players because the certificate is self-signed**
+("Your connection is not private"), and may also report an address mismatch when using a
+different address from the primary LAN or WAN IPs. For a server you recognize and trust,
+a joining player can use the browser's certificate exception that's available in most modern
+browsers and allows to continue to the site.
+
+The host can also send players the cert.pem file, which they can then deploy to their browser's
+trusted certificate storage, allowing them to join without issues or warnings.
+
+**Never give out the private key.pem file**, as it will allow a malicious attacker to impersonate
+your server.
+
+One more option is that the host can create a reverse proxy, circumventing the need to hand out
+the public certificate file.
 
 ### Server lifecycle
 
@@ -220,7 +240,6 @@ example `anyworld --host 0.0.0.0 --port 4141`. Development reload is available w
 `python app.py --reload`; code-triggered reloads also reset the in-memory game.
 
 ## Quality checks
-
 
 Set `PYTHONDONTWRITEBYTECODE=1` before the checks: `export PYTHONDONTWRITEBYTECODE=1`
 in Bash, or `$env:PYTHONDONTWRITEBYTECODE = "1"` in PowerShell.
@@ -244,10 +263,10 @@ part of this review-safe workflow. Cleanup cannot be guaranteed after forced pro
 
 ## Logs and diagnostics
 
-Normal server logs include compaction stages, estimates, timing and rollback; inference jobs,
-retries, accepted actions, and transcript writes. Private-guidance checks log player names,
-roll values, and whether a retry reused the rolls. These logs are for the server operator;
-private checks are not broadcast to players.
+The game logs quite a bit of its behavior to the console. Logs include compaction stages,
+estimates, timing and rollback; inference jobs, retries, accepted actions, and transcript writes.
+Private-guidance checks log player names, roll values, and whether a retry reused the rolls.
+These logs are for the server operator; private checks are not broadcast to players.
 
 ### Raw model responses
 
