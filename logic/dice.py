@@ -3,7 +3,7 @@
 import secrets
 import re
 
-from core.schemas import ChanceEvent, ChanceEventResult
+from core.schemas import ChanceEvent, ChanceEventResult, ChanceRuleDecision
 
 
 def private_chance_rules(guidance: str) -> dict[str, tuple[str, int]]:
@@ -16,7 +16,10 @@ def private_chance_rules(guidance: str) -> dict[str, tuple[str, int]]:
     return rules
 
 
-def validate_chance_events(events: list[ChanceEvent], guidance: str) -> list[ChanceEvent]:
+def validate_chance_events(
+    events: list[ChanceEvent],
+    guidance: str,
+) -> list[ChanceEvent]:
     """Resolve model references to trusted rules; tolerate unambiguous paraphrases."""
     rules = private_chance_rules(guidance)
     normalized = []
@@ -51,6 +54,40 @@ def validate_chance_events(events: list[ChanceEvent], guidance: str) -> list[Cha
             event.model_copy(update={"source_rule": rule[0], "occurrence": occurrence})
         )
     return normalized
+
+
+def chance_events_from_decisions(
+    decisions: dict[str, ChanceRuleDecision], guidance: str
+) -> list[ChanceEvent]:
+    """Build every roll from per-rule occurrences, without a second applicability flag."""
+    rules = private_chance_rules(guidance)
+    if set(decisions) != set(rules):
+        raise ValueError(
+            "Chance plan must account for every private rule in chance_rule_decisions: "
+            + ", ".join(rules)
+            + ". Do not omit earlier rows or stop after selecting one rule."
+        )
+    events = []
+    for rule_id, (_, percentage) in rules.items():
+        decision = decisions[rule_id]
+        if not decision.reason.strip():
+            raise ValueError("Explain each rule's triggering occurrences or why none occurred.")
+        occurrences = decision.occurrences
+        if decision.trigger == "per_round":
+            # Every-round rules get exactly one check; other conditions use condition.
+            occurrences = ["round"]
+        for occurrence in occurrences:
+            events.append(
+                ChanceEvent(
+                    source_rule=rule_id,
+                    chance_percent=percentage,
+                    trigger=decision.trigger,
+                    occurrence=occurrence,
+                )
+            )
+    if len(events) > 16:
+        raise ValueError("More than 16 chance occurrences apply; split or simplify the rules.")
+    return validate_chance_events(events, guidance)
 
 
 def roll_chance(event: ChanceEvent) -> ChanceEventResult:

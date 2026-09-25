@@ -58,12 +58,22 @@ class ChanceEventResult(StrictModel):
     occurred: bool
 
 
+class ChanceRuleDecision(StrictModel):
+    """One authoritative list of occurrences for a private rule this round."""
+
+    trigger: Literal["per_round", "condition"]
+    occurrences: list[str] = Field(max_length=16)
+    reason: str = Field(min_length=1, max_length=240)
+
+
 class DicePlan(StrictModel):
     """LLM-selected checks; hidden names are never disclosed to clients."""
 
     rolls: dict[str, bool]
     hidden_rolls: list[str]
+    hidden_roll_sources: dict[str, str] = Field(default_factory=dict)
     chance_events: list[ChanceEvent] = Field(default_factory=list, max_length=16)
+    chance_rule_decisions: dict[str, ChanceRuleDecision] = Field(default_factory=dict)
 
 
 class ContextSummary(StrictModel):
