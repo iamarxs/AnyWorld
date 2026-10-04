@@ -29,7 +29,6 @@ from logic.dice import (
     conditional_chance_rule,
     has_non_percentage_private_guidance,
     non_percentage_guidance_lines,
-    normalize_chance_rule_decision,
 )
 from logic.presentation import name_resolution
 from logic.debug_log import RawResponseLogger, set_debug_round_number
@@ -505,16 +504,10 @@ class LLMContextManager:
                 check_semantics(result, expected_names)
                 if isinstance(result, DicePlan):
                     try:
-                        decision = normalize_chance_rule_decision(
-                            chance_decision,
-                            self.private_guidance,
-                            self.chance_rule_interpretation,
-                            expected_names,
-                        )
                         result = result.model_copy(
                             update={
                                 "chance_events": chance_events_from_decision(
-                                    decision,
+                                    chance_decision,
                                     self.private_guidance,
                                     self.chance_rule_interpretation,
                                     expected_names,
