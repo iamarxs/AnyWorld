@@ -378,12 +378,5 @@ class LobbyMixin:
             ),
             "submitted_actions": self._submitted_actions_locked(),
             "player_order": [self.players[client_id].name for client_id in self.join_order],
-            "players": [
-                {
-                    "name": self.players[client_id].name,
-                    "connected": self.players[client_id].is_connected,
-                    "is_host": self.players[client_id].is_host,
-                }
-                for client_id in self.join_order
-            ],
+            "players": self._player_roster_event().payload["players"],
         }
