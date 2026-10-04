@@ -74,7 +74,6 @@ class ChanceRuleDecision(StrictModel):
 
     trigger: Literal["per_round", "condition"]
     occurrences: list[str] = Field(max_length=100)
-    reason: str = Field(min_length=1, max_length=240)
 
 
 class ChanceRuleInterpretation(StrictModel):

@@ -147,11 +147,6 @@ def normalize_chance_rule_decision(
         return ChanceRuleDecision(
             trigger="per_round",
             occurrences=["round"],
-            reason=(
-                "The private rule explicitly applies once every round."
-                if _is_per_round_rule(instruction)
-                else "No conditional trigger was specified; use the per-round default."
-            ),
         )
     if decision is None:
         raise ValueError("The conditional chance rule requires a structured trigger decision.")
@@ -227,8 +222,6 @@ def chance_events_from_decision(
     normalized = normalize_chance_rule_decision(decision, guidance, interpretation, expected_names)
     if normalized is None:
         return []
-    if not normalized.reason.strip():
-        raise ValueError("Explain the chance rule's triggering occurrences or why none occurred.")
     if rule is None:
         return []
     instruction, percentage = rule

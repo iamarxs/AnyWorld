@@ -336,9 +336,7 @@ def test_single_conditional_rule_preserves_multiple_player_occurrences():
 
 
 def test_occurrences_are_the_single_source_of_chance_rolls():
-    decision = ChanceRuleDecision(
-        trigger="condition", occurrences=[event().occurrence], reason="Building entered."
-    )
+    decision = ChanceRuleDecision(trigger="condition", occurrences=[event().occurrence])
     assert dice.chance_events_from_decision(decision, RULE) == [event()]
     decision.occurrences = []
     assert dice.chance_events_from_decision(decision, RULE) == []
@@ -346,9 +344,7 @@ def test_occurrences_are_the_single_source_of_chance_rolls():
 
 def test_conditional_round_occurrence_is_rejected_instead_of_rolled():
     """A conditional rule cannot become active merely because a round occurred."""
-    decision = ChanceRuleDecision(
-        trigger="condition", occurrences=["round"], reason="The round occurred."
-    )
+    decision = ChanceRuleDecision(trigger="condition", occurrences=["round"])
 
     with pytest.raises(ValueError, match="reserved for per-round"):
         dice.chance_events_from_decision(decision, RULE)
@@ -393,7 +389,6 @@ def test_conditional_chance_trigger_cannot_be_reclassified_as_per_round():
     decision = ChanceRuleDecision(
         trigger="per_round",
         occurrences=[event().occurrence],
-        reason="The building was entered.",
     )
 
     normalized = dice.normalize_chance_rule_decision(decision, RULE)
@@ -405,9 +400,7 @@ def test_conditional_chance_trigger_cannot_be_reclassified_as_per_round():
 
 def test_chance_rule_without_explicit_trigger_defaults_to_per_round():
     rule = "Add a 40% chance one of the players suddenly gets handed a Banana Split from nowhere."
-    decision = ChanceRuleDecision(
-        trigger="condition", occurrences=[], reason="No trigger occurred."
-    )
+    decision = ChanceRuleDecision(trigger="condition", occurrences=[])
 
     events = dice.chance_events_from_decision(decision, rule)
 

@@ -260,7 +260,6 @@ class LLMContextManager:
         if interpretation.cadence == "per_round" and not interpretation.eligibility:
             return ChanceRuleDecision(
                 trigger="per_round",
-                reason="Once for each eligible scope this round.",
                 occurrences=(
                     list(round_buffer)
                     if interpretation.occurrence_scope == "per_player"
@@ -291,11 +290,6 @@ class LLMContextManager:
         return ChanceRuleDecision(
             trigger="condition",
             occurrences=matched,
-            reason=(
-                "The structured trigger pass found a current occurrence."
-                if matched
-                else "The structured trigger pass found no current occurrence."
-            ),
         )
 
     async def plan_dice(self, round_buffer: dict[str, str], current_state: str = "") -> DicePlan:
