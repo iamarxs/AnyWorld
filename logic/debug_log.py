@@ -257,11 +257,7 @@ class RawResponseLogger:
         else:
             record.pop("round_number")
         write = asyncio.create_task(
-            asyncio.to_thread(
-                self._write_round_record if is_round_request else self._write,
-                filename,
-                record,
-            )
+            asyncio.to_thread(self._write, filename, record)
         )
         request.extensions["anyworld_debug_request"] = request_record
         request.extensions["anyworld_debug_request_type"] = request_type
@@ -313,11 +309,7 @@ class RawResponseLogger:
         if not is_round_request:
             record.pop("round_number")
         write = asyncio.create_task(
-            asyncio.to_thread(
-                self._write_round_record if is_round_request else self._write,
-                filename,
-                record,
-            )
+            asyncio.to_thread(self._write, filename, record)
         )
         try:
             await asyncio.shield(write)
@@ -353,12 +345,8 @@ class RawResponseLogger:
                 sequences.append({"choice_index": index, "content": thinking})
         return sequences
 
-    def _write_round_record(self, filename: str, record: dict[str, Any]) -> None:
-        """Write one readable temporary record, retaining it after failures."""
-        self._write_text(filename, _round_record_text(record))
-
     def _write(self, filename: str, record: dict[str, Any]) -> None:
-        """Keep standalone disk failures nonfatal and private data out of console logs."""
+        """Keep diagnostic disk failures nonfatal and private data out of console logs."""
         self._write_text(filename, _round_record_text(record))
 
     def _write_text(self, filename: str, text: str) -> bool:
