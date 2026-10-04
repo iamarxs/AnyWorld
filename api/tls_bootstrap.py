@@ -96,15 +96,6 @@ def _validate_pair(cert_path: Path, key_path: Path, addresses: list[str]) -> Non
         ) from exc
 
 
-def _cert_covers_ip_and_is_fresh(ip: str) -> bool:
-    """Return whether the existing certificate covers the IP and is not expiring soon."""
-    try:
-        _validate_pair(CERT_PATH, KEY_PATH, [ip])
-        return True
-    except ValueError:
-        return False
-
-
 def _generate_cert(ip: str, addresses: list[str] | None = None) -> tuple[Path, Path]:
     """Generate a self-signed certificate and key covering the given IP."""
     CERT_DIR.mkdir(exist_ok=True)
