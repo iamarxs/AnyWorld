@@ -1,5 +1,7 @@
 # Copy to config.yaml or select a local file with AD_CONFIG_PATH.
-# Set AD_SERVER__HOST_PASSWORD and AD_SERVER__PLAYER_PASSWORD before launch.
+# Set distinct host_password and player_password values below before launch.
+# Alternatively, set AD_SERVER__HOST_PASSWORD and AD_SERVER__PLAYER_PASSWORD;
+# environment variables override the values below.
 server:
   host: "0.0.0.0"
   port: 4141
@@ -27,6 +29,8 @@ llm:
 
   # Shared by llama.cpp and OpenAI: none disables thinking; low/medium/high enable it.
   # llama.cpp effort levels depend on the loaded model and its chat template.
+  # Note: The configuration is included as an experiment. Reasoning "none" has so far given the best
+  # gameplay experience both with local Gemma 4 and OpenAI's gpt-5.6-luna.
   reasoning_effort: "none" # none/low/medium/high
   system_prompt: |
     You are the Dungeon Master, world simulator, and rules arbiter for a multiplayer text RPG.
