@@ -22,6 +22,7 @@ class ClientPayload(StrictModel):
         "scenario_init",
         "start_game",
         "end_game",
+        "new_game",
         "retry_round",
         "journal_request",
     ]

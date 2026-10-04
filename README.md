@@ -106,8 +106,9 @@ identity allows you to reclaim that character; the password and name alone are n
 
 Clearing site data, changing browsers, or using a different address can prevent recovery.
 Rejoining restores the opening and current state, then replays available missed public events.
-Action drafts and pending submissions are retained through connection interruptions. The
-on-screen game log holds up to 500 entries and chat holds up to 300.
+Action drafts and pending submissions are retained through connection interruptions within the
+same game and cleared when joining a new game. The on-screen game log holds up to 500 entries
+and chat holds up to 300.
 
 ## History and longer games
 
@@ -125,8 +126,12 @@ shows how much conversation is retained; its details explain the counting method
 limit, and total AI usage. The total usage across calls is different from the space occupied
 by the current conversation.
 
-One server runs one game at a time. Restarting loses the live session, and a transcript cannot
-be loaded as a saved game. Restart the server to begin another game after ending one.
+One server runs one game at a time. After ending a game, the host can click **Start new game**
+to create a new scenario without restarting the server. Other players are disconnected and
+must join again once the scenario is ready. The new game starts with fresh AI context, logs,
+and History state; the previous game's archives remain on the server. A separate HTML transcript
+is created when the new game starts, even if its title matches the previous game.
+Restarting the server loses the live session, and a transcript cannot be loaded as a saved game.
 
 ## Development
 

@@ -31,6 +31,7 @@ function browser(localStorage = storage(), sessionStorage = storage()) {
             querySelector() { return node("button"); },
             querySelectorAll() { return []; },
             append() {}, appendChild() {}, replaceChildren() {}, focus() {}, after() {},
+            reset() { this.resetCalled = true; },
             click() { downloads.push({ href: this.href, download: this.download }); },
             setAttribute() {}, getClientRects() { return [1]; }, contains() { return false; },
         });
@@ -365,6 +366,105 @@ test("scenario validation errors remain visible in the host form", async () => {
     assert.equal(tab.node("scenario-form").querySelector().disabled, false);
 });
 
+
+test("only the ended host can restart, and a fresh session restores scenario creation", async () => {
+    const tab = browser();
+    const socket = tab.sockets[0];
+    socket.open();
+    await tab.login("Host");
+    socket.receive("auth_ok", { name: "Host", reconnect_token: "host-token", is_host: true,
+        state: "ACTIVE_TURN", session_id: "old-game", players: [], player_order: [] });
+    assert.equal(tab.node("new-game-button").hidden, true);
+    socket.receive("game_ended", { msg: "The host ended the game." });
+    assert.equal(tab.node("new-game-button").hidden, false);
+    tab.node("new-game-button").listeners.click();
+    assert.deepEqual(socket.sent.at(-1), { event_type: "new_game", data: {} });
+    assert.equal(tab.node("new-game-button").disabled, true);
+    tab.node("action-input").value = "Old action";
+    tab.session.pendingAction = { session_id: "old-game" };
+    tab.node("start-button").disabled = true;
+    socket.receive("auth_ok", { name: "Host", reconnect_token: "host-token", is_host: true,
+        state: "SCENARIO_INJECTION", session_id: "new-game", players: [], player_order: [] });
+    assert.equal(tab.node("host-modal").hidden, false);
+    assert.equal(tab.node("scenario-step").hidden, false);
+    assert.equal(tab.node("lobby-step").hidden, true);
+    assert.equal(tab.node("scenario-form").resetCalled, true);
+    assert.equal(tab.node("start-button").disabled, false);
+    assert.equal(tab.node("new-game-button").hidden, true);
+    assert.equal(tab.session.pendingAction, null);
+    assert.equal(tab.node("action-input").value, "");
+    assert.equal(tab.session.cursor, 0);
+    assert.equal(tab.session.savedAuth.reconnect_token, "host-token");
+    socket.receive("auth_ok", { name: "Host", reconnect_token: "host-token", is_host: true,
+        state: "ENDED", session_id: "new-game", players: [], player_order: [] });
+    assert.equal(tab.node("new-game-button").hidden, false);
+    const player = await joined();
+    player.sockets[0].receive("game_ended", { msg: "The host ended the game." });
+    assert.equal(player.node("new-game-button").hidden, true);
+});
+
+test("a new game disconnects players without automatically rejoining", async () => {
+    const tab = await joined();
+    tab.sockets[0].close(4002);
+    assert.equal(tab.node("login-modal").hidden, false);
+    assert.equal(tab.node("grid-container").hidden, true);
+    assert.equal(tab.session.savedAuth, null);
+    assert.match(tab.node("login-error").textContent, /Join again/);
+    assert.throws(() => tab.reconnect(), /reconnect should be scheduled/);
+    await tab.login();
+    assert.equal(tab.sockets.length, 2);
+    tab.sockets[1].open();
+    assert.equal(tab.sockets[1].sent[0].event_type, "auth");
+});
+
+for (const newSession of [false, true]) {
+    test(`reload ${newSession ? "clears an old-game" : "preserves a same-game"} unsent draft`, async () => {
+        const local = storage();
+        const persisted = storage();
+        const tab = await joined(local, persisted);
+        tab.sockets[0].receive("auth_ok", { name: "Arxs", reconnect_token: "private-token",
+            state: "ACTIVE_TURN", session_id: "old-game", players: [], player_order: [] });
+        tab.node("action-input").value = "Use the brass key";
+        tab.node("action-input").listeners.input();
+        if (newSession) tab.sockets[0].close(4002);
+        const reopened = browser(local, persisted);
+        reopened.sockets[0].open();
+        if (newSession) await reopened.login();
+        const sessionId = newSession ? "new-game" : "old-game";
+        reopened.sockets[0].receive("auth_ok", { name: "Arxs", reconnect_token: "fresh-token",
+            state: "ACTIVE_TURN", session_id: sessionId, players: [], player_order: [] });
+        const text = newSession ? "" : "Use the brass key";
+        assert.equal(reopened.node("action-input").value, text);
+        const draft = JSON.parse(persisted.getItem("artificialDungeonDraft"));
+        assert.equal(draft.text, text);
+        assert.equal(draft.session_id, sessionId);
+        assert.equal(draft.pending, null);
+    });
+}
+
+test("new sessions reset completed history searches and ignore late old replies", async () => {
+    const tab = await joined();
+    tab.sockets[0].receive("auth_ok", { name: "Host", reconnect_token: "host-token", is_host: true,
+        state: "ENDED", session_id: "old-game", players: [], player_order: [] });
+    tab.node("history-search").value = "old dragon";
+    tab.node("history-button").listeners.click();
+    tab.sockets[0].receive("journal_page", { session_id: "old-game", mode: "history",
+        cursor: 120, has_more: true, events: [] });
+    assert.equal(tab.session.historyCursor, 120);
+    assert.equal(tab.node("history-next").disabled, false);
+    tab.sockets[0].receive("auth_ok", { name: "Host", reconnect_token: "host-token", is_host: true,
+        state: "SCENARIO_INJECTION", session_id: "new-game", players: [], player_order: [] });
+    assert.equal(tab.session.historyCursor, 0);
+    assert.equal(tab.node("history-search").value, "");
+    assert.equal(tab.node("history-next").disabled, true);
+    assert.equal(tab.node("history-export").disabled, false);
+    tab.sockets[0].receive("journal_page", { session_id: "old-game", mode: "history",
+        cursor: 240, has_more: true, events: [] });
+    assert.equal(tab.session.historyCursor, 0);
+    tab.node("history-button").listeners.click();
+    assert.deepEqual(tab.sockets[0].sent.at(-1).data,
+        { mode: "history", after: 0, limit: 100, search: "" });
+});
 
 for (const mode of ["replay", "export"]) {
     test(`${mode} resumes a rejected page beyond 3100 events and restores controls`, async () => {

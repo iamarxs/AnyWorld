@@ -266,4 +266,5 @@ function applySnapshot(payload) {
     }
     showHostStep(payload.state);
     elements.endGameButton.hidden = !clientSession.isHost || !["ACTIVE_TURN", "AWAITING_LLM"].includes(payload.state);
+    elements.newGameButton.hidden = !clientSession.isHost || payload.state !== "ENDED";
 }

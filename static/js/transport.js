@@ -51,7 +51,7 @@ function connectSocket() {
         elements.connectionStatus.textContent = "Reconnecting...";
         elements.actionInput.disabled = true;
         elements.chatInput.disabled = true;
-        if (event.code === 4001 || event.code === 1008) {
+        if (event.code === 4001 || event.code === 4002 || event.code === 1008) {
             clientSession.replaced = event.code === 4001;
             elements.reclaimButton.hidden = !clientSession.replaced;
             elements.connectionStatus.textContent = clientSession.replaced
@@ -59,6 +59,17 @@ function connectSocket() {
             if (!clientSession.replaced) {
                 rememberAuth(null);
                 elements.loginModal.hidden = false;
+                if (event.code === 4002) {
+                    elements.grid.hidden = true;
+                    elements.hostModal.hidden = true;
+                    elements.historyModal.hidden = true;
+                    elements.newGameButton.hidden = true;
+                    elements.endGameButton.hidden = true;
+                    elements.retryRoundButton.hidden = true;
+                    setThinking(false);
+                    elements.connectionStatus.textContent = "Disconnected for a new game.";
+                    elements.loginError.textContent = "The host is creating a new game. Join again when the scenario is ready.";
+                }
             }
             return;
         }

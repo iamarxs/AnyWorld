@@ -42,6 +42,8 @@ class LobbyMixin:
             handler = getattr(self, self.PAYLOAD_HANDLERS[payload.event_type])
             await handler(client_id, payload.data)
         except ValueError as exc:
+            if not authorize():
+                return
             LOGGER.info("Client event rejected event=%s", payload.event_type)
             await self._send_error(client_id, str(exc))
             if payload.event_type == "action":
@@ -314,6 +316,7 @@ class LobbyMixin:
         return ServerEvent(
             type="player_roster",
             payload={
+                "session_id": self.session_id,
                 "players": [
                     {
                         "name": self.players[player_id].name,
@@ -321,7 +324,7 @@ class LobbyMixin:
                         "is_host": self.players[player_id].is_host,
                     }
                     for player_id in self.join_order
-                ]
+                ],
             },
         )
 

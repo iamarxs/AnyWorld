@@ -18,6 +18,7 @@ from api.admission import WindowBudget, receive_payload, origin_allowed, source_
 from api.windows_asyncio import install_windows_socket_cleanup
 from logic.engine import GameEngine
 from logic.llm_manager import LLMContextManager
+from logic.models import GameState, Player
 
 LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -179,7 +180,7 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
         engine = GameEngine(manager, resolver_factory())
 
         async def lost(client_id):
-            await engine.handle_disconnect(
+            await application.state.engine.handle_disconnect(
                 client_id, still_disconnected=lambda: client_id not in manager.active_connections
             )
 
@@ -201,7 +202,7 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
             yield
         finally:
             try:
-                await engine.shutdown()
+                await application.state.engine.shutdown()
             finally:
                 await manager.close()
 
@@ -213,6 +214,39 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
     async def get_index(request: Request) -> HTMLResponse:
         """Serve the main HTML page."""
         return templates.TemplateResponse(request=request, name="index.html")
+
+    async def start_new_game(websocket: WebSocket, client_id: str) -> GameEngine:
+        """Replace an ended session, retaining only its authenticated host."""
+        manager = websocket.app.state.manager
+        previous = websocket.app.state.engine
+        async with previous.lock:
+            host = previous.players.get(client_id)
+            if not manager.owns(client_id, websocket) or host is None or not host.is_host:
+                raise ValueError("Only the host can start a new game.")
+            if previous.state is not GameState.ENDED:
+                raise ValueError("End the current game before starting a new one.")
+
+        # Construction touches archive directories; keep it outside the state lock.
+        # No awaits until publication: no socket can join or restart between these steps.
+        engine = GameEngine(manager, resolver_factory())
+        host = Player(client_id, host.name, True, reconnect_token=host.reconnect_token)
+        engine.players[client_id] = host
+        engine.join_order.append(client_id)
+        engine.turn_queue.append(client_id)
+        engine.state = GameState.SCENARIO_INJECTION
+        sockets = [
+            socket for owner, socket in manager.active_connections.items() if owner != client_id
+        ]
+        for socket in sockets:
+            manager._forget(socket)
+        websocket.app.state.engine = engine
+        await asyncio.gather(*(manager.close_socket(socket, code=4002) for socket in sockets))
+        await previous.shutdown()
+        await manager.send_personal(
+            client_id, ServerEvent(type="auth_ok", payload=engine._snapshot_locked(host))
+        )
+        LOGGER.info("New game created; previous players disconnected")
+        return engine
 
     @application.websocket("/ws/{client_id}")
     async def websocket_endpoint(websocket: WebSocket, client_id: str) -> None:
@@ -276,6 +310,7 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
                             continue
                     payload = ClientPayload.model_validate(raw_payload)
                     validate_client_data(payload)
+                    engine = websocket.app.state.engine
                     if not authenticated:
                         if payload.event_type != "auth":
                             raise ValueError("Authenticate before sending game messages.")
@@ -283,10 +318,16 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
                             await manager.close_socket(websocket, code=1013)
                             break
                         previous = []
+
+                        def activate():
+                            if engine is not websocket.app.state.engine:
+                                raise ValueError("The game changed. Please join again.")
+                            previous.append(manager.promote(client_id, websocket))
+
                         await engine._authenticate(
                             client_id,
                             payload.data,
-                            activate=lambda: previous.append(manager.promote(client_id, websocket)),
+                            activate=activate,
                         )
                         authenticated = True
                         if previous and previous[0] is not None:
@@ -295,11 +336,14 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
                         break
                     elif payload.event_type == "auth":
                         raise ValueError("This socket is already authenticated.")
+                    elif payload.event_type == "new_game":
+                        engine = await start_new_game(websocket, client_id)
                     else:
                         await engine.process_payload(
                             client_id,
                             payload,
-                            authorize=lambda: manager.owns(client_id, websocket),
+                            authorize=lambda: engine is websocket.app.state.engine
+                            and manager.owns(client_id, websocket),
                         )
                 except (ValidationError, ValueError) as exc:
                     if not authenticated:

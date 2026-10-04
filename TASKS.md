@@ -205,13 +205,30 @@ Existing history/benchmark observations are retained and were not independently 
   - Measurement (2026-09-27): synthetic two-player run on GPT-5.6 Luna using default caching completed 16 rounds with no added idle waits. Across setup and the failed 17th round: 250,560 input tokens, 117,808 cached reads (47%), 131,154 cache-write tokens and 7,900 output tokens; estimated cost $0.0449 versus $0.0596 without cache reads/writes (about 25% lower). Resolution-call cache reads rose to about 95% by round 16; dice-planning calls had no cache hits. Round 17 stopped after three dice-planning failures, with context compaction rolling back each time.
   - Priority conclusion: demoted from P2 to P3. Default caching already yields substantial reuse and estimated savings, so no immediate cache-control change is justified. Revisit if real player idle intervals, cold/expired-cache behavior, or production cost data show a gap. The round-17 compaction failure is a separate memory/reliability concern, not evidence that cache controls need tuning.
 
-- [ ] **P3 - Support multiple sessions and host reset** - Isolate engines, resolvers, credentials, transcripts and cancellation before adding workers/reset. Retains earlier repository backlog intent.
-- [ ] **P3 - Evaluate multilingual play** - OpenAI prompts already follow the scenario's language;
-  compatible-provider prompts currently request English. Broader language support and multilingual
-  coherence/token-budget evaluation remain open rather than assuming a model class is required.
+- [ ] **P3 - Support multiple sessions** - Isolate engines, resolvers, credentials, transcripts and cancellation before adding concurrent sessions/workers. Host reset after ENDED is implemented; concurrent sessions remain open.
 - [ ] **P3 - Version static assets reproducibly** - Replace manual ?v= values with content/build hashes and suitable cache headers so unchanged assets stay cached and edits invalidate reliably.
 
 ## Done
+
+- [x] ~~P2 - Clean up Start new game after ENDED~~ (2026-10-04)
+  - The host retains its authenticated identity and returns to scenario creation with a fresh
+    engine, resolver and public journal. Previous players disconnect and must explicitly rejoin;
+    the old resolver closes and a new, collision-safe HTML transcript is created on Start.
+  - Suppressed late preflight errors after a handler loses engine/socket ownership. Saved drafts
+    now include session IDs, preserving same-game reloads while clearing old or unscoped drafts.
+    Session changes reset History filters/cursors, export state and player colors.
+  - Regression coverage checks late errors after player rejoining, draft reloads, History reset,
+    and distinct same-title HTML files that exclude old scenario/private guidance and leave the
+    finalized previous file unchanged.
+  - Validation: 388 Python tests and 22 Node client tests passed; Black and Flake8 passed.
+    Python reported the existing Starlette deprecation warning. No live inference was run.
+
+- [x] ~~P2 - Add an option to start a new game once last one is finished~~ (2026-10-04)
+
+- [x] ~~P3 - Evaluate multilingual play~~ (2026-10-04)
+  - User-reported manual evaluation across several game playthroughs; considered complete.
+    OpenAI narration follows the scenario's language, while compatible-provider prompts
+    currently request English. These existing provider instructions remain unchanged.
 
 - [x] ~~P2 - Remove the private chance-rule JSON preview~~ (2026-10-04)
   - Removed the host-form preview, its input listener, DOM reference and CSS. Structured chance

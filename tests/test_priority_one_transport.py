@@ -10,6 +10,7 @@ from starlette.websockets import WebSocketDisconnect
 from api.server import ConnectionManager, create_app
 from core.config import settings
 from core.schemas import ServerEvent
+from logic.llm.errors import LLMResolutionError
 from test_engine import FakeResolver, password_digest
 
 
@@ -87,6 +88,175 @@ def test_password_alone_cannot_reclaim_an_existing_client_id():
                 receive_until(replacement, "chat_echo")
                 assert app.state.engine.players[host_id].is_connected
                 assert not app.state.engine.players[host_id].return_pending
+
+
+def test_new_game_retains_host_and_requires_players_to_join_a_fresh_session():
+    """Restart only after ending; replace archives, inference context and player identities."""
+    app = create_app(FakeResolver)
+    host_id, player_id, pending_id = (str(uuid4()) for _ in range(3))
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/{host_id}") as host:
+            authenticate(host, host_id)
+            host_token = receive_until(host, "auth_ok")["payload"]["reconnect_token"]
+            host.send_json({"event_type": "new_game", "data": {}})
+            assert "End the current game" in receive_until(host, "error")["payload"]["msg"]
+            host.send_json(
+                {
+                    "event_type": "scenario_init",
+                    "data": {"scenario": "Old gate", "guidance": "Old private guidance"},
+                }
+            )
+            receive_until(host, "scenario_ready")
+            with client.websocket_connect(f"/ws/{player_id}") as player:
+                authenticate(player, player_id, "Player", settings.server.player_password)
+                player_token = receive_until(player, "auth_ok")["payload"]["reconnect_token"]
+                host.send_json({"event_type": "start_game", "data": {}})
+                receive_until(host, "turn_directive")
+                previous = app.state.engine
+                host.send_json({"event_type": "end_game", "data": {}})
+                receive_until(host, "game_ended")
+                receive_until(player, "game_ended")
+                player.send_json({"event_type": "new_game", "data": {}})
+                assert "Only the host" in receive_until(player, "error")["payload"]["msg"]
+                with client.websocket_connect(f"/ws/{pending_id}") as pending:
+                    host.send_json({"event_type": "new_game", "data": {}})
+                    snapshot = receive_until(host, "auth_ok")["payload"]
+                    assert snapshot["state"] == "SCENARIO_INJECTION"
+                    assert snapshot["session_id"] != previous.session_id
+                    assert snapshot["reconnect_token"] == host_token
+                    assert snapshot["latest_event_id"] == 0
+                    assert snapshot["scenario_title"] is None
+                    assert snapshot["opening_scenario"] is None
+                    assert snapshot["accepted_actions"] == []
+                    assert list(app.state.engine.players) == [host_id]
+                    assert app.state.engine.resolver is not previous.resolver
+                    assert app.state.engine.transcript is not previous.transcript
+                    assert app.state.engine.journal is not previous.journal
+                    assert previous.transcript.path.read_text().endswith("</html>\n")
+                    previous_html = previous.transcript.path.read_text()
+                    with pytest.raises(WebSocketDisconnect) as exc:
+                        player.receive_json()
+                    assert exc.value.code == 4002
+                    authenticate(pending, pending_id, "Pending", settings.server.player_password)
+                    assert "not accepting" in receive_until(pending, "error")["payload"]["msg"]
+                    host.send_json(
+                        {"event_type": "scenario_init", "data": {"scenario": "New forest"}}
+                    )
+                    receive_until(host, "scenario_ready")
+                    # A socket opened in the old session authenticates against the new engine.
+                    authenticate(pending, pending_id, "Pending", settings.server.player_password)
+                    assert receive_until(pending, "auth_ok")["payload"]["session_id"] == (
+                        snapshot["session_id"]
+                    )
+                    with client.websocket_connect(f"/ws/{player_id}") as rejoined:
+                        authenticate(
+                            rejoined,
+                            player_id,
+                            "Player",
+                            settings.server.player_password,
+                            reconnect_token=player_token,
+                        )
+                        fresh = receive_until(rejoined, "auth_ok")["payload"]
+                        assert fresh["reconnect_token"] != player_token
+                        assert fresh["session_id"] == snapshot["session_id"]
+                        host.send_json({"event_type": "start_game", "data": {}})
+                        receive_until(host, "turn_directive")
+                        assert app.state.engine.resolver.scenario == "New forest"
+                        assert app.state.engine.resolver.start_names == [
+                            ["Host", "Pending", "Player"]
+                        ]
+                        new_path = app.state.engine.transcript.path
+                        assert new_path != previous.transcript.path
+                        assert "New forest" in new_path.read_text()
+                        assert "Old gate" not in new_path.read_text()
+                        assert "Old private guidance" not in new_path.read_text()
+                        assert previous.transcript.path.read_text() == previous_html
+
+
+def test_old_action_failure_cannot_reply_to_a_player_in_the_new_game(monkeypatch):
+    """A socket's pending preflight must lose reply rights when its session is replaced."""
+
+    class DelayedResolver(FakeResolver):
+        def __init__(self):
+            super().__init__()
+            self.block = False
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.closed = False
+
+        async def preflight_round(self, actions, current_state=""):
+            if self.block:
+                self.entered.set()
+                await self.release.wait()
+                raise LLMResolutionError("Old game preflight failed")
+
+        async def close(self):
+            self.closed = True
+
+    app = create_app(DelayedResolver)
+    host_id, player_id = str(uuid4()), str(uuid4())
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/{host_id}") as host:
+            authenticate(host, host_id)
+            receive_until(host, "auth_ok")
+            host.send_json({"event_type": "scenario_init", "data": {"scenario": "Old gate"}})
+            receive_until(host, "scenario_ready")
+            with client.websocket_connect(f"/ws/{player_id}") as player:
+                authenticate(player, player_id, "Player", settings.server.player_password)
+                receive_until(player, "auth_ok")
+                host.send_json({"event_type": "start_game", "data": {}})
+                receive_until(host, "turn_directive")
+                previous = app.state.engine
+                host.send_json({"event_type": "action", "data": {"action": "Open gate"}})
+                receive_until(
+                    host, "turn_directive", lambda e: e["payload"]["active_player_id"] == player_id
+                )
+                previous.resolver.block = True
+                finished = asyncio.Event()
+                process = previous.process_payload
+
+                async def observed_payload(client_id, payload, **kwargs):
+                    try:
+                        await process(client_id, payload, **kwargs)
+                    finally:
+                        if client_id == player_id and payload.event_type == "action":
+                            finished.set()
+
+                monkeypatch.setattr(previous, "process_payload", observed_payload)
+                player.send_json({"event_type": "action", "data": {"action": "Watch gate"}})
+
+                async def wait_for_preflight():
+                    await asyncio.wait_for(previous.resolver.entered.wait(), 2)
+
+                client.portal.call(wait_for_preflight)
+                host.send_json({"event_type": "end_game", "data": {}})
+                receive_until(host, "game_ended")
+                host.send_json({"event_type": "new_game", "data": {}})
+                receive_until(host, "auth_ok")
+                assert previous.resolver.closed
+                host.send_json({"event_type": "scenario_init", "data": {"scenario": "New forest"}})
+                receive_until(host, "scenario_ready")
+                with client.websocket_connect(f"/ws/{player_id}") as rejoined:
+                    authenticate(rejoined, player_id, "Player", settings.server.player_password)
+                    receive_until(rejoined, "auth_ok")
+
+                    async def finish_old_preflight():
+                        previous.resolver.release.set()
+                        await asyncio.wait_for(finished.wait(), 2)
+
+                    client.portal.call(finish_old_preflight)
+                    rejoined.send_json(
+                        {"event_type": "chat", "data": {"message": "New game message"}}
+                    )
+                    # The chat is a FIFO barrier after any late preflight error.
+                    for _ in range(30):
+                        event = rejoined.receive_json()
+                        assert event["type"] != "error"
+                        if event["type"] == "chat_echo":
+                            assert event["payload"]["chat"] == "New game message"
+                            break
+                    else:
+                        raise AssertionError("New session chat was not delivered")
 
 
 def test_invalid_auth_attempt_limit_includes_malformed_json():

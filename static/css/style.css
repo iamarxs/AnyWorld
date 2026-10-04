@@ -389,11 +389,13 @@ button:disabled {
 @keyframes pulse {
     50% { opacity: 0.3; transform: scale(0.65); }
 }
-#end-game-button {
+#end-game-button, #new-game-button {
     position: fixed;
     z-index: 7;
     right: 0.6rem;
     top: 2.4rem;
+}
+#end-game-button {
     border-color: rgb(228 125 125 / 55%);
     color: var(--error);
 }

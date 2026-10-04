@@ -4,7 +4,7 @@ const clientSession = {
  clientId: null, savedAuth: null, ws: null, connectionTimer: null,
  reconnectAttempts: 0, reconnectTimer: null, authenticated: false, isHost: false,
  scenarioSubmitting: false, lastStartedRound: 0, sessionId: null, cursor: 0,
- pendingAction: null, replaced: false, replaying: false, roundNumber: null,
+ pendingAction: null, draftSessionId: null, replaced: false, replaying: false, roundNumber: null,
  seenEvents: new Set(), renderedRounds: new Set(),
  replaySnapshot: null, liveEvents: [], historyCursor: 0, exportEvents: [],
 };
@@ -47,6 +47,7 @@ const elements = {
     tokenChart: document.getElementById("token-chart"),
     tokenCount: document.getElementById("token-count"),
     endGameButton: document.getElementById("end-game-button"),
+    newGameButton: document.getElementById("new-game-button"),
     retryRoundButton: document.getElementById("retry-round-button"),
     reclaimButton: document.getElementById("reclaim-button"),
     historyButton: document.getElementById("history-button"),

@@ -31,9 +31,12 @@ clientSession.savedAuth = readStoredObject("sessionStorage", "artificialDungeonA
 const savedDraft = readStoredObject("sessionStorage", "artificialDungeonDraft");
 elements.actionInput.value = typeof savedDraft?.text === "string" ? savedDraft.text : "";
 clientSession.pendingAction = savedDraft?.pending || null;
+clientSession.draftSessionId = savedDraft?.session_id || clientSession.pendingAction?.session_id || null;
 
 function saveDraft() {
+    clientSession.draftSessionId = clientSession.sessionId;
     writeStored("sessionStorage", "artificialDungeonDraft", JSON.stringify({
+        session_id: clientSession.draftSessionId,
         text: elements.actionInput.value, pending: clientSession.pendingAction,
     }));
 }

@@ -25,19 +25,50 @@ function handleMessage(message, replayed = false) {
         clientSession.liveEvents = [];
         clientSession.liveEvents = [];
         if (payload.session_id && payload.session_id !== clientSession.sessionId) {
+            clientSession.replaying = false;
+            resetJournalRequests();
             clientSession.cursor = 0;
             clientSession.renderedRounds.clear();
             renderedActions.clear();
+            playerColors.clear();
             clientSession.lastStartedRound = 0;
             const banner = document.getElementById("game-banner");
             elements.log.replaceChildren(banner);
+            elements.chatMessages.replaceChildren();
+            elements.historyEntries.replaceChildren();
+            elements.historyModal.hidden = true;
+            clientSession.historyCursor = 0;
+            elements.historySearch.value = "";
+            elements.historyNext.disabled = true;
+            elements.historyExport.disabled = false;
+            clientSession.exportEvents = [];
+            clientSession.exportUntil = null;
+            elements.title.textContent = "Awaiting scenario initialization...";
+            elements.tokenUsage.hidden = true;
+            if (clientSession.sessionId || clientSession.draftSessionId !== payload.session_id ||
+                (clientSession.pendingAction &&
+                    clientSession.pendingAction.session_id !== payload.session_id)) {
+                clientSession.pendingAction = null;
+                elements.actionInput.value = "";
+            }
+            elements.chatInput.value = "";
+            if (payload.is_host && payload.state === "SCENARIO_INJECTION") {
+                elements.scenarioForm.reset();
+                clientSession.scenarioSubmitting = false;
+                elements.hostStatus.textContent = "";
+                elements.hostStatus.classList.remove("error");
+                elements.scenarioForm.querySelector("button").disabled = false;
+                elements.startButton.disabled = false;
+            }
         }
+        elements.newGameButton.disabled = false;
         clientSession.replaying = Boolean(payload.session_id && payload.latest_event_id > clientSession.cursor);
         clientSession.replaySnapshot = payload;
         clientSession.reconnectAttempts = 0;
         clientSession.replaced = false;
         elements.reclaimButton.hidden = true;
         clientSession.sessionId = payload.session_id || clientSession.sessionId;
+        saveDraft();
         clientSession.roundNumber = payload.round_number || null;
         (payload.accepted_actions || []).forEach(acceptAction);
         rememberAuth({ ...clientSession.savedAuth, name: payload.name, reconnect_token: payload.reconnect_token });
@@ -150,6 +181,7 @@ function handleMessage(message, replayed = false) {
         elements.actionInput.disabled = true;
         elements.endGameButton.hidden = true;
         elements.retryRoundButton.hidden = true;
+        elements.newGameButton.hidden = !clientSession.isHost;
         appendText(elements.chatMessages, `System: ${payload.msg}`, "chat-entry", MAX_CHAT_ENTRIES);
     } else if (type === "scenario_ready") {
         clientSession.scenarioSubmitting = false;
@@ -174,6 +206,7 @@ function handleMessage(message, replayed = false) {
         }
         elements.scenarioForm.querySelector("button").disabled = false;
         elements.startButton.disabled = false;
+        elements.newGameButton.disabled = false;
         if (payload.state) {
             showHostStep(payload.state);
             elements.hostStatus.textContent = payload.msg;
@@ -260,6 +293,10 @@ elements.endGameButton.addEventListener("click", () => {
 
 elements.retryRoundButton.addEventListener("click", () => {
     send("retry_round", {});
+});
+
+elements.newGameButton.addEventListener("click", () => {
+    if (send("new_game", {})) elements.newGameButton.disabled = true;
 });
 
 elements.startButton.addEventListener("click", () => {
