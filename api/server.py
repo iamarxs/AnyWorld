@@ -6,10 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from core.config import settings
@@ -208,12 +207,11 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
 
     application = FastAPI(title="Anyworld", lifespan=lifespan)
     application.mount("/static", StaticFiles(directory=PROJECT_ROOT / "static"), name="static")
-    templates = Jinja2Templates(directory=PROJECT_ROOT / "templates")
 
-    @application.get("/", response_class=HTMLResponse)
-    async def get_index(request: Request) -> HTMLResponse:
+    @application.get("/", response_class=FileResponse)
+    async def get_index() -> FileResponse:
         """Serve the main HTML page."""
-        return templates.TemplateResponse(request=request, name="index.html")
+        return FileResponse(PROJECT_ROOT / "templates" / "index.html")
 
     async def start_new_game(websocket: WebSocket, client_id: str) -> GameEngine:
         """Replace an ended session, retaining only its authenticated host."""

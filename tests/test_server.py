@@ -15,6 +15,7 @@ def test_index_and_static_assets_are_served() -> None:
         stylesheet = client.get("/static/css/style.css")
 
     assert index.status_code == 200
+    assert index.headers["content-type"] == "text/html; charset=utf-8"
     assert "login-modal" in index.text
     assert script.status_code == 200
     assert "WebSocket" in script.text
