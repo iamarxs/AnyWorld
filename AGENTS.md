@@ -35,6 +35,11 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
   OpenAI narration follows the scenario's language; compatible-provider narration requests English.
 - `api/server.py` owns GET /, /static, /ws/{client_id}, ConnectionManager and an engine/resolver
   per ASGI lifespan. Lifespan validates passwords and closes sockets, tasks and clients.
+  Host-only `new_game` replaces an ENDED engine with a fresh engine/resolver, retaining only
+  the authenticated host's identity/token. Prior player sockets close with 4002 and require
+  explicit rejoining after scenario setup; pending sockets authenticate against the current engine.
+  Old rejected handlers recheck engine/socket ownership before replying. The old resolver closes;
+  the new game owns a distinct public journal and creates a separate HTML transcript on Start.
   Client IDs must be canonical UUIDs. No multi-session or multi-worker coordination exists.
 - `logic/models.py` contains GameState (including ENDED), Player and dependency protocols.
   `logic/lobby.py` owns authentication, scenario setup, start/end, chat and reconnect snapshots.
@@ -62,7 +67,7 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
   uncertain; they are not rejected solely because the requested target seems impossible.
   No generation occurs just because a player joins.
 - Client envelope: event_type plus object data. Events: auth, chat, action, scenario_init,
-  start_game, end_game, retry_round, journal_request. Auth sends name and SHA-256 password_digest
+  start_game, end_game, new_game, retry_round, journal_request. Auth sends name and SHA-256 password_digest
   of password + client ID. Reauthentication additionally requires the private reconnect_token from auth_ok,
   retained in browser sessionStorage. The ID/token pair is also saved per name in localStorage
   for recovery after re-entering name/password at the same origin; passwords/digests are not stored
@@ -82,12 +87,16 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
 - `logic/transcript.py` writes escaped HTML under .logged_games/YYYY-MM-DD-title[-suffix].html,
   not TXT. Appends are thread-offloaded; directory creation at construction is synchronous.
   Original scenario prompt and Opening scenario are separate sections; private guidance and hidden
-  checks are included. Token usage is broadcast to all after rounds.
+  checks are included. Private DM guidance has separate Freeform guidance and Chance event
+  subtitles; structured rules render labeled, human-readable settings, while legacy rules retain
+  their original text. The resolver still receives the original combined private context.
+  Token usage is broadcast to all after rounds.
   Writes/finalization are serialized; cancellation waits for outstanding file writes.
-- `logic/journal.py` keeps a separate allowlisted public JSONL journal under `.public_games/`,
+- `logic/journal.py` keeps allowlisted public events only in memory for the current game,
   with session IDs and event cursors for reconnect replay, paginated history, search and export.
-  It excludes private guidance/rolls. Archive failures retain bounded pending events; clients
-  receive an incomplete-history indicator when recovery cannot provide the complete archive.
+  It excludes private guidance/rolls and never creates or writes `.public_games/` files. Browser
+  History export still downloads JSONL; a new game or server restart clears public history.
+  Pages retain the 512 KiB response budget and the `incomplete: false` compatibility field.
 - Inference runs as an owned task outside socket receive loops. Generation IDs prevent stale
   commits. LLM round failures receive up to two automatic retries within the existing job deadline,
   reusing pending actions/dice. Exhausted failures pause; the host can retry or end. Reconnection
@@ -156,6 +165,9 @@ Mobile <=700px stacks title/log/chat/input. The log is capped at 500 DOM entries
 and snapshots retain the opening separately from the latest round state. Reconnect catch-up uses
 public journal cursors rather than embedding full history in snapshots; History provides search
 and JSONL export. Host-typed scenario prompt precedes the generated Opening scenario.
+After ENDED, only the host sees Start new game. Session changes clear chat/log entries,
+History filters/cursors, export buffers, and player colors. Saved action drafts carry a session ID;
+same-game reloads preserve them, while different or unscoped drafts are cleared on authentication.
 The host card is min(48rem, 100%) wide, with chance-control labels above their own inputs in
 two columns, stacking into one column at <=700px. Inputs can shrink. Chance rules are validated
 on scenario submission; the host form has no JSON preview. Freeform DM guidance remains separate.

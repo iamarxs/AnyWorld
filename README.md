@@ -113,12 +113,15 @@ and chat holds up to 300.
 ## History and longer games
 
 The **History** panel offers paginated public events, search, and a JSONL export. This public
-journal excludes private DM guidance and hidden checks and is separate from the server's HTML
-transcripts. Archive failures can limit available history; the client reports missing history.
+history stays in server memory for the current game; no JSONL logs are automatically written.
+Use **Export public history** to download a JSONL file before starting another game or restarting
+the server. Public history excludes private DM guidance and hidden checks.
 
 The game writes HTML transcripts to `.logged_games/` on the server. They include the original
 scenario prompt, generated opening, player actions, results, and dice rolls. **Transcripts also
 include private DM guidance and hidden checks**, which remain out of the players' live game log.
+The private guidance section separates freeform guidance from the chance event. Structured
+events show readable chance, timing, scope, trigger, eligibility, and effect fields.
 
 For longer games, the AI summarizes older rounds into memory and checks the summary for lost
 facts. If a summary fails those checks, the original history is kept. The context indicator
