@@ -118,30 +118,12 @@ class ResolutionManager(Protocol):
         """Normalize the private conditional percentage rule before the first action."""
         ...
 
-    async def discover_context_window(self) -> None:
-        """Discover the backend context window size."""
-        ...
-
     async def generate_scenario_title(self) -> str:
         """Generate only the scenario title before players join."""
         ...
 
-    async def generate_start_state(self, player_names: list[str]) -> RoundResolution:
-        """Introduce the joined players at game start."""
-        ...
-
     async def plan_dice(self, round_buffer: dict[str, str], current_state: str = "") -> DicePlan:
         """Plan which actions need a d100 check."""
-        ...
-
-    async def generate_resolution(
-        self,
-        round_buffer: dict[str, str],
-        dice_results: dict[str, int] | None = None,
-        hidden_rolls: set[str] | None = None,
-        chance_events: list[ChanceEventResult] | None = None,
-    ) -> RoundResolution:
-        """Resolve a round of actions."""
         ...
 
     async def preflight_round(self, actions: dict[str, str], current_state: str = "") -> None:

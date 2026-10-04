@@ -82,9 +82,6 @@ class FakeResolver:
     async def prepare_chance_rule(self):
         pass
 
-    async def discover_context_window(self):
-        pass
-
     async def preflight_round(self, actions, current_state=""):
         pass
 
