@@ -165,6 +165,5 @@ async def attempt(
         if self.usage_round is not None:
             self.round_usage.add(record)
             self.round_usage_by_kind.setdefault(kind, UsageTotals()).add(record)
-        self.last_token_usage = record["total_tokens"] or count
         logger.info("LLM usage %s", json.dumps(record, sort_keys=True))
     return result, response_text

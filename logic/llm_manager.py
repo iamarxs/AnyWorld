@@ -74,7 +74,6 @@ class LLMContextManager:
         self.budget = TokenBudget()
         self._retained_measurement = None
         self.system_prompt = {"role": "system", "content": settings.llm.system_prompt}
-        self.system_prompt_tokens = self.budget.count_tokens(settings.llm.system_prompt)
         self.genesis_state: dict[str, str] | None = None
         self.history: list[dict[str, str]] = []
         self.memory: dict[str, str] | None = None
@@ -82,7 +81,6 @@ class LLMContextManager:
         self.chance_rule_interpretation: ChanceRuleInterpretation | None = None
         self._chance_rule_prepared = False
         self._known_player_names: list[str] = []
-        self.last_token_usage = self.system_prompt_tokens + 3
         self.game_usage = UsageTotals()
         self.round_usage = UsageTotals()
         self.usage_round: int | None = None
@@ -240,7 +238,6 @@ class LLMContextManager:
         self._chance_rule_prepared = True
 
     def configure_chance_rule(self, rule) -> None:
-        self.structured_chance_rule = rule
         if rule is not None:
             self.chance_rule_interpretation = ChanceRuleInterpretation(
                 trigger_type="world_transition",
