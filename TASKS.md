@@ -210,6 +210,11 @@ Existing history/benchmark observations are retained and were not independently 
 
 ## Done
 
+- [x] ~~Add browser-local scenario save, load and delete controls~~ (2026-10-04)
+  - Named localStorage saves preserve the written scenario, including all guidance and other information.
+    Overwriting and deletion require confirmation; storage failures report an error without
+    overwriting existing saves. Scenario saves stay completely local
+
 - [x] ~~P2 - Keep public History in memory with manual JSONL export~~ (2026-10-04)
   - Removed automatic `.public_games/` writes and disk archive recovery. Full public event
     history remains in memory for the current game, with replay, pagination, search and browser

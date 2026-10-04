@@ -6,6 +6,13 @@ A multiplayer text adventure where you never have to roll dice or keep score —
 character does. One player (the host) describes the scenario, then everyone takes turns acting in
 their own words while an AI weaves every choice into a story that keeps unfolding.
 
+### What's new (2026-10-04)
+
+- Save and reuse scenarios: The host can save, load, and delete scenarios in their browser. Scenarios are stored in the browser's localStorage and stay completely local.
+- Start another adventure: After ending a game, the host can create a new scenario without restarting the server.
+- Browse and export History: Easily search previous public events for forgotten details. Also exportable as JSONL.
+- Multilingual play: With the OpenAI backend, narration follows the language of your scenario.
+
 ## Get started
 
 One person runs the game server and connects it to an AI model. Everyone plays in a browser.
@@ -51,14 +58,14 @@ the game cannot guarantee that it follows every instruction perfectly.
 
 Use the **One private chance rule (optional)** controls for one random event per game:
 
-| Control | Meaning |
-| --- | --- |
-| Chance | Whole-number percentage from 0–100%; leave blank to disable the rule. |
-| Cadence | **Once each round** or **On a triggering occurrence**. |
+| Control            | Meaning                                                               |
+| ------------------ | --------------------------------------------------------------------- |
+| Chance             | Whole-number percentage from 0–100%; leave blank to disable the rule. |
+| Cadence            | **Once each round** or **On a triggering occurrence**.                |
 | Occurrence trigger | Required for conditional cadence; leave blank for every-round checks. |
-| Eligibility | Optional condition that must hold; it does not change the cadence. |
-| Effect | What happens when the chance check succeeds. |
-| Roll scope | One shared check or one check per eligible player in the round. |
+| Eligibility        | Optional condition that must hold; it does not change the cadence.    |
+| Effect             | What happens when the chance check succeeds.                          |
+| Roll scope         | One shared check or one check per eligible player in the round.       |
 
 For example, set Chance to 20, choose conditional cadence, use "A player enters a building"
 as the trigger, "The building is unstable" as eligibility, and "The building collapses" as

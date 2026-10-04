@@ -57,7 +57,7 @@ function handleMessage(message, replayed = false) {
                 clientSession.scenarioSubmitting = false;
                 elements.hostStatus.textContent = "";
                 elements.hostStatus.classList.remove("error");
-                elements.scenarioForm.querySelector("button").disabled = false;
+                elements.scenarioForm.querySelector('button[type="submit"]').disabled = false;
                 elements.startButton.disabled = false;
             }
         }
@@ -193,7 +193,7 @@ function handleMessage(message, replayed = false) {
         elements.hostStatus.textContent = `“${payload.title}” is ready.`;
         elements.scenarioStep.hidden = true;
         elements.lobbyStep.hidden = false;
-        elements.scenarioForm.querySelector("button").disabled = false;
+        elements.scenarioForm.querySelector('button[type="submit"]').disabled = false;
     } else if (type === "error") {
         if (handleJournalError(payload)) return;
         const message = (payload.msg || "Unknown server error.") +
@@ -204,7 +204,7 @@ function handleMessage(message, replayed = false) {
         } else {
             showError(message);
         }
-        elements.scenarioForm.querySelector("button").disabled = false;
+        elements.scenarioForm.querySelector('button[type="submit"]').disabled = false;
         elements.startButton.disabled = false;
         elements.newGameButton.disabled = false;
         if (payload.state) {
@@ -263,7 +263,7 @@ elements.scenarioForm.addEventListener("submit", (event) => {
         })
     ) {
         clientSession.scenarioSubmitting = true;
-        elements.scenarioForm.querySelector("button").disabled = true;
+        elements.scenarioForm.querySelector('button[type="submit"]').disabled = true;
         elements.hostStatus.classList.remove("error");
         elements.hostStatus.textContent = "Generating the scenario...";
     }

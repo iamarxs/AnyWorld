@@ -268,6 +268,48 @@ button:disabled {
     display: grid;
     gap: 0.75rem;
 }
+#scenario-library {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0.75rem 0 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+#scenario-library input,
+#scenario-library select {
+    width: 100%;
+    min-width: 0;
+}
+#scenario-library > p {
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+#scenario-library > p.error {
+    color: var(--error);
+}
+#scenario-library button {
+    justify-self: start;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.75rem;
+    border-color: #80536f;
+    background: #382331;
+    color: #edccdf;
+    font-size: 0.85rem;
+}
+#scenario-library button:hover:not(:disabled) {
+    border-color: #bb82a4;
+    background: #503044;
+    transform: none;
+}
+#scenario-form > button[type="submit"] {
+    padding: 0.85rem 1rem;
+    font-weight: 600;
+}
+.scenario-library-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
 #scenario-form > label,
 #scenario-form details label {
     display: block;

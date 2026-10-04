@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Anyworld</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=20">
+  <link rel="stylesheet" href="/static/css/style.css?v=23">
   <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
@@ -86,7 +86,7 @@
             </div>
             <div class="chance-field">
               <label for="chance-effect">Effect</label>
-              <input id="chance-effect" maxlength="500">
+              <input id="chance-effect" maxlength="500" placeholder="The building collapses onto the player">
             </div>
             <div class="chance-field">
               <label for="chance-scope">Roll scope</label>
@@ -115,6 +115,20 @@
             </ul>
             Only the dedicated field above may contain a percentage-based event. Python rolls that one event;
             the AI follows this guidance to shape the story.
+          </div>
+          <div id="scenario-library">
+            <p>You may save the scenario to your browser's localStorage so the same scenario can be easily
+              loaded for other game rounds as well. All data stays local in your browser.</p>
+            <label for="saved-scenarios">Saved scenarios</label>
+            <select id="saved-scenarios"><option value="">Choose a saved scenario</option></select>
+            <div class="scenario-library-actions">
+              <button id="load-scenario" type="button" disabled>Load</button>
+              <button id="delete-scenario" type="button" disabled>Delete</button>
+            </div>
+            <label for="scenario-save-name">Save name</label>
+            <input id="scenario-save-name" maxlength="100" autocomplete="off">
+            <button id="save-scenario" type="button">Save scenario</button>
+            <p id="scenario-storage-status" role="status"></p>
           </div>
           <button type="submit">Generate scenario</button>
         </form>
@@ -158,7 +172,8 @@
   <script src="/static/js/transport.js?v=recovery-4"></script>
   <script src="/static/js/accessibility.js?v=recovery-2"></script>
   <script src="/static/js/journal.js?v=recovery-3"></script>
-  <script src="/static/js/app.js?v=recovery-6"></script>
+  <script src="/static/js/scenarios.js?v=2"></script>
+  <script src="/static/js/app.js?v=recovery-7"></script>
 </body>
 
 </html>

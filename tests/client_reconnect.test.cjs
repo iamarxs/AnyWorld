@@ -5,7 +5,7 @@ const { randomUUID, createHash, webcrypto } = require("node:crypto");
 const vm = require("node:vm");
 const path = require("node:path");
 
-const source = ["state", "identity", "rendering", "transport", "accessibility", "journal", "app"]
+const source = ["state", "identity", "rendering", "transport", "accessibility", "journal", "scenarios", "app"]
     .map((name) => readFileSync(path.join(__dirname, `../static/js/${name}.js`), "utf8"))
     .join("\n");
 
@@ -22,6 +22,7 @@ function browser(localStorage = storage(), sessionStorage = storage()) {
     const nodes = new Map();
     const downloads = [];
     const blobs = [];
+    let createdId = 0;
     function node(id) {
         if (!nodes.has(id)) nodes.set(id, {
             hidden: id === "grid-container", disabled: false, value: "", textContent: "",
@@ -30,7 +31,9 @@ function browser(localStorage = storage(), sessionStorage = storage()) {
             addEventListener(type, callback) { this.listeners[type] = callback; },
             querySelector() { return node("button"); },
             querySelectorAll() { return []; },
-            append() {}, appendChild() {}, replaceChildren() {}, focus() {}, after() {},
+            append(...children) { this.children.push(...children); },
+            appendChild() {}, replaceChildren(...children) { this.children = children; },
+            focus() {}, after() {},
             reset() { this.resetCalled = true; },
             click() { downloads.push({ href: this.href, download: this.download }); },
             setAttribute() {}, getClientRects() { return [1]; }, contains() { return false; },
@@ -65,12 +68,13 @@ function browser(localStorage = storage(), sessionStorage = storage()) {
     const window = {
         location: { protocol: "https:", host: "game.test:4141" },
         crypto: { randomUUID, subtle: webcrypto.subtle }, localStorage, sessionStorage, setTimeout,
+        confirm: () => true,
     };
     const runtime = {
         window, sessionStorage, WebSocket: Socket, setTimeout, clearTimeout, console, Blob, TextEncoder,
         URL: { createObjectURL(blob) { blobs.push(blob); return "blob:test"; }, revokeObjectURL() {} },
         MutationObserver: class { observe() {} },
-        document: { getElementById: node, createElement: node, listeners: {},
+        document: { getElementById: node, createElement: (tag) => node(`${tag}-${++createdId}`), listeners: {},
             createDocumentFragment: () => node("fragment"),
             addEventListener(type, callback) { this.listeners[type] = callback; } },
     };
@@ -534,4 +538,100 @@ test("failed or disconnected history operations release buffers and controls", a
     socket.close();
     assert.equal(tab.node("history-export").disabled, false);
     assert.equal(tab.session.exportEvents.length, 0);
+});
+
+test("named scenarios round-trip every field across tabs without sending private content", () => {
+    const local = storage();
+    const tab = browser(local);
+    const fields = {
+        "scenario-input": "  A Finnish forest.\nHyvää iltaa!  ",
+        "guidance-input": "\nThe guide is secretly a ghost.\n",
+        "chance-event-input": "  Add a 40% chance per round that a bell rings.  ",
+        "chance-percent": "0", "chance-cadence": "condition",
+        "chance-trigger": "A player enters a building", "chance-eligibility": "It is unstable",
+        "chance-effect": "The ceiling falls", "chance-scope": "per_player",
+    };
+    for (const [id, value] of Object.entries(fields)) tab.node(id).value = value;
+    const name = "<img src=x onerror=alert(1)>";
+    tab.node("scenario-save-name").value = name;
+    tab.node("save-scenario").listeners.click();
+    const reopened = browser(local);
+    assert.equal(reopened.node("saved-scenarios").children[1].textContent, name);
+    assert.equal(reopened.node("load-scenario").disabled, true);
+    reopened.node("saved-scenarios").value = name;
+    reopened.node("saved-scenarios").listeners.change();
+    assert.equal(reopened.node("load-scenario").disabled, false);
+    reopened.node("load-scenario").listeners.click();
+    for (const [id, value] of Object.entries(fields)) assert.equal(reopened.node(id).value, value);
+    // Saving a draft does not require a valid chance rule. Loading replaces empty fields too.
+    for (const percentage of ["", "100"]) {
+        reopened.node("chance-percent").value = percentage;
+        reopened.node("chance-event-input").value = "";
+        reopened.node("save-scenario").listeners.click();
+        reopened.node("chance-event-input").value = "stale legacy rule";
+        reopened.node("load-scenario").listeners.click();
+        assert.equal(reopened.node("chance-percent").value, percentage);
+        assert.equal(reopened.node("chance-event-input").value, "");
+    }
+    assert.equal(local.getItem("artificialDungeonScenarios").includes("secretly a ghost"), true);
+    assert.equal(tab.sockets[0].sent.length + reopened.sockets[0].sent.length, 0);
+});
+
+test("overwrite and deletion preserve other scenarios, current form, and unrelated storage", () => {
+    const local = storage();
+    local.setItem("unrelated", "keep me");
+    const tab = browser(local);
+    for (const name of ["First", "Second"]) {
+        tab.node("scenario-save-name").value = name;
+        tab.node("scenario-input").value = name;
+        tab.node("save-scenario").listeners.click();
+    }
+    tab.node("scenario-input").value = "Edited second";
+    const before = local.getItem("artificialDungeonScenarios");
+    tab.runtime.window.confirm = () => false;
+    tab.node("save-scenario").listeners.click();
+    tab.node("delete-scenario").listeners.click();
+    assert.equal(local.getItem("artificialDungeonScenarios"), before);
+    tab.runtime.window.confirm = () => true;
+    tab.node("save-scenario").listeners.click();
+    assert.equal(JSON.parse(local.getItem("artificialDungeonScenarios"))[1].fields.scenario, "Edited second");
+    tab.node("delete-scenario").listeners.click();
+    assert.deepEqual(JSON.parse(local.getItem("artificialDungeonScenarios")).map((entry) => entry.name), ["First"]);
+    assert.equal(tab.node("scenario-input").value, "Edited second");
+    assert.equal(local.getItem("unrelated"), "keep me");
+    assert.equal(tab.node("delete-scenario").disabled, true);
+    tab.node("saved-scenarios").value = "First";
+    tab.node("delete-scenario").listeners.click();
+    assert.deepEqual(JSON.parse(local.getItem("artificialDungeonScenarios")), []);
+    assert.equal(tab.node("saved-scenarios").children[0].textContent, "No saved scenarios");
+});
+
+test("scenario storage errors do not erase saves or alter the form", () => {
+    for (const invalid of ["{", "null", "{}", '[{"name":"Broken","fields":{}}]']) {
+        const local = storage();
+        local.setItem("artificialDungeonScenarios", invalid);
+        const tab = browser(local);
+        tab.node("scenario-input").value = "Keep this draft";
+        tab.node("scenario-save-name").value = "Draft";
+        tab.node("save-scenario").listeners.click();
+        tab.node("saved-scenarios").value = "Broken";
+        tab.node("load-scenario").listeners.click();
+        tab.node("delete-scenario").listeners.click();
+        assert.equal(local.getItem("artificialDungeonScenarios"), invalid);
+        assert.equal(tab.node("scenario-input").value, "Keep this draft");
+        assert.match(tab.node("scenario-storage-status").textContent, /Could not access/);
+    }
+    const local = storage();
+    const tab = browser(local);
+    tab.node("save-scenario").listeners.click();
+    assert.match(tab.node("scenario-storage-status").textContent, /Enter a name/);
+    tab.node("scenario-save-name").value = "Draft";
+    local.setItem = () => { throw new Error("Quota exceeded"); };
+    tab.node("save-scenario").listeners.click();
+    assert.equal(local.getItem("artificialDungeonScenarios"), null);
+    assert.match(tab.node("scenario-storage-status").textContent, /Could not access/);
+    local.getItem = () => { throw new Error("Storage blocked"); };
+    const blocked = browser(local);
+    assert.match(blocked.node("scenario-storage-status").textContent, /Could not access/);
+    assert.equal(blocked.sockets.length, 1);
 });
