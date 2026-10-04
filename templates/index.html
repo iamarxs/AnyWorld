@@ -66,7 +66,8 @@
         <form id="scenario-form">
           <label for="scenario-input">Describe the setting, characters, and opening situation</label>
           <textarea id="scenario-input" maxlength="20000" required></textarea>
-          <fieldset aria-describedby="chance-rule-tips"><legend>Chance-based event rule (optional)</legend>
+          <fieldset aria-describedby="chance-rule-tips">
+            <legend>Chance-based event rule (optional)</legend>
             <p id="chance-rule-tips">Set the chance of an event happening and describe its effect.
               Choose when to check, who is eligible, and whether to roll once for everyone or separately
               for each eligible player. The roll is private; its outcome shapes the story.
@@ -77,8 +78,10 @@
             </div>
             <div class="chance-field">
               <label for="chance-cadence">Cadence</label>
-              <select id="chance-cadence"><option value="per_round">Once each round</option>
-                <option value="condition">On a triggering occurrence</option></select>
+              <select id="chance-cadence">
+                <option value="per_round">Once each round</option>
+                <option value="condition">On a triggering occurrence</option>
+              </select>
             </div>
             <div class="chance-field">
               <label for="chance-trigger">Occurrence trigger (conditional cadence only)</label>
@@ -94,8 +97,10 @@
             </div>
             <div class="chance-field">
               <label for="chance-scope">Roll scope</label>
-              <select id="chance-scope"><option value="shared">One shared roll</option>
-                <option value="per_player">One roll per eligible player</option></select>
+              <select id="chance-scope">
+                <option value="shared">One shared roll</option>
+                <option value="per_player">One roll per eligible player</option>
+              </select>
             </div>
           </fieldset>
           <label for="guidance-input">Additional freeform DM guidance (optional)</label>
@@ -106,7 +111,12 @@
             <ul>
               <li><strong>Story Guidance:</strong> Non-probabilistic instructions to steer the world or direction.
                 <em>Example: "Steer responses toward the absurd, as if the scenario happened in a universe that
-                  does not conform to basic logic." or for comedic purposes: </em></li>
+                  does not conform to basic logic." or for comedic purposes: "Introduce a sunglasses-wearing half-naked
+                  dwarf with a brief visible cameo early in the journey, then let him disappear from view for a while.
+                  Bring him back at suitable later moments, separated by stretches without sightings. Each cameo is a
+                  single incidental sentence of visual comedy; it should not become a threat, mystery to solve, or
+                  obstacle.</em>
+              </li>
             </ul>
             Use the chance-based event rule above for percentage-based events;
             the AI follows this guidance to shape the story.
@@ -115,7 +125,9 @@
             <p>You may save the scenario to your browser's localStorage so the same scenario can be easily
               loaded for other game rounds as well. All data stays local in your browser.</p>
             <label for="saved-scenarios">Saved scenarios</label>
-            <select id="saved-scenarios"><option value="">Choose a saved scenario</option></select>
+            <select id="saved-scenarios">
+              <option value="">Choose a saved scenario</option>
+            </select>
             <div class="scenario-library-actions">
               <button id="load-scenario" type="button" disabled>Load</button>
               <button id="delete-scenario" type="button" disabled>Delete</button>
@@ -146,7 +158,8 @@
       <button id="history-close" type="button">Close history</button>
       <h2>Public game history</h2>
       <form id="history-form"><input id="history-search" maxlength="200" aria-label="Search public history">
-        <button type="submit">Search from beginning</button></form>
+        <button type="submit">Search from beginning</button>
+      </form>
       <div id="history-entries"></div>
       <button id="history-next" type="button">Next page</button>
       <button id="history-export" type="button">Export public history</button>

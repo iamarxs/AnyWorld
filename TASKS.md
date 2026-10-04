@@ -210,7 +210,7 @@ Existing history/benchmark observations are retained and were not independently 
 
 ## Done
 
-- [x] **2026-10-04 — Structured chance-rule form only.** Removed the legacy chance-text input, payload field, validation and transcript fallback. Renamed the section to “Chance-based event rule (optional)” and added simple instructions; updated saved-scenario fields and asset cache versions.
+- [x] ~~2026-10-04 — Structured chance-rule form only~~ Removed the legacy chance-text input, payload field, validation and transcript fallback. Renamed the section to “Chance-based event rule” and added simple instructions; updated saved-scenario fields and asset cache versions.
 
 - [x] ~~Add browser-local scenario save, load and delete controls~~ (2026-10-04)
   - Named localStorage saves preserve the written scenario, including all guidance and other information.
