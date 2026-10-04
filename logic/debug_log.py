@@ -256,9 +256,7 @@ class RawResponseLogger:
             self._round_temp_files.setdefault(round_number, set()).add(filename)
         else:
             record.pop("round_number")
-        write = asyncio.create_task(
-            asyncio.to_thread(self._write, filename, record)
-        )
+        write = asyncio.create_task(asyncio.to_thread(self._write, filename, record))
         request.extensions["anyworld_debug_request"] = request_record
         request.extensions["anyworld_debug_request_type"] = request_type
         request.extensions["anyworld_debug_round_number"] = round_number
@@ -308,9 +306,7 @@ class RawResponseLogger:
                 self._round_temp_files.setdefault(round_number, set()).add(filename)
         if not is_round_request:
             record.pop("round_number")
-        write = asyncio.create_task(
-            asyncio.to_thread(self._write, filename, record)
-        )
+        write = asyncio.create_task(asyncio.to_thread(self._write, filename, record))
         try:
             await asyncio.shield(write)
         except asyncio.CancelledError:
