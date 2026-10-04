@@ -310,8 +310,7 @@ button:disabled {
     flex-wrap: wrap;
     gap: 0.5rem;
 }
-#scenario-form > label,
-#scenario-form details label {
+#scenario-form > label {
     display: block;
 }
 #scenario-form fieldset {
@@ -320,7 +319,8 @@ button:disabled {
     gap: 0.55rem 0.75rem;
     min-width: 0;
 }
-#scenario-form fieldset legend {
+#scenario-form fieldset legend,
+#chance-rule-tips {
     grid-column: 1 / -1;
 }
 #scenario-form .chance-field {
@@ -333,8 +333,7 @@ button:disabled {
     display: block;
 }
 #scenario-form fieldset input,
-#scenario-form fieldset select,
-#scenario-form details input {
+#scenario-form fieldset select {
     width: 100%;
     min-width: 0;
 }
@@ -351,7 +350,7 @@ button:disabled {
     min-height: 6rem;
     resize: vertical;
 }
-#chance-event-tips,
+#chance-rule-tips,
 #guidance-tips {
     font-size: 0.9rem;
     color: var(--muted);
@@ -512,7 +511,8 @@ button:disabled {
     #scenario-form fieldset {
         grid-template-columns: minmax(0, 1fr);
     }
-    #scenario-form fieldset legend {
+    #scenario-form fieldset legend,
+    #chance-rule-tips {
         grid-column: 1;
     }
 }

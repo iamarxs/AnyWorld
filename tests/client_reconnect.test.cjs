@@ -546,7 +546,6 @@ test("named scenarios round-trip every field across tabs without sending private
     const fields = {
         "scenario-input": "  A Finnish forest.\nHyvää iltaa!  ",
         "guidance-input": "\nThe guide is secretly a ghost.\n",
-        "chance-event-input": "  Add a 40% chance per round that a bell rings.  ",
         "chance-percent": "0", "chance-cadence": "condition",
         "chance-trigger": "A player enters a building", "chance-eligibility": "It is unstable",
         "chance-effect": "The ceiling falls", "chance-scope": "per_player",
@@ -566,12 +565,12 @@ test("named scenarios round-trip every field across tabs without sending private
     // Saving a draft does not require a valid chance rule. Loading replaces empty fields too.
     for (const percentage of ["", "100"]) {
         reopened.node("chance-percent").value = percentage;
-        reopened.node("chance-event-input").value = "";
+        reopened.node("chance-eligibility").value = "";
         reopened.node("save-scenario").listeners.click();
-        reopened.node("chance-event-input").value = "stale legacy rule";
+        reopened.node("chance-eligibility").value = "stale eligibility";
         reopened.node("load-scenario").listeners.click();
         assert.equal(reopened.node("chance-percent").value, percentage);
-        assert.equal(reopened.node("chance-event-input").value, "");
+        assert.equal(reopened.node("chance-eligibility").value, "");
     }
     assert.equal(local.getItem("artificialDungeonScenarios").includes("secretly a ghost"), true);
     assert.equal(tab.sockets[0].sent.length + reopened.sockets[0].sent.length, 0);

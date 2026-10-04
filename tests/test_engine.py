@@ -170,23 +170,26 @@ def test_scenario_uses_one_separate_chance_event_and_freeform_guidance(
                 "scenario_init",
                 scenario="A gate blocks the road.",
                 guidance="Keep the tone eerie.",
-                chance_event="Add a 40% chance every round that a bell rings.",
+                chance_rule={
+                    "chance_percent": 40,
+                    "cadence": "per_round",
+                    "effect": "A bell rings.",
+                    "scope": "shared",
+                },
             ),
         )
         await engine.wait_for_inference()
 
         assert engine.private_guidance == (
-            "Keep the tone eerie.\nAdd a 40% chance every round that a bell rings."
+            "Keep the tone eerie.\n40% per round; scope: shared; effect: A bell rings."
         )
         assert sender.events_of_type("scenario_ready")
         await engine.process_payload("host", payload("start_game"))
         await engine.wait_for_inference()
         content = engine.transcript.path.read_text(encoding="utf-8")
         assert '<h3>Freeform guidance</h3>\n<p class="state">Keep the tone eerie.</p>' in content
-        assert (
-            '<h3>Chance event</h3>\n<p class="state">'
-            "Add a 40% chance every round that a bell rings.</p>"
-        ) in content
+        assert "<dt>Chance</dt><dd>40%</dd>" in content
+        assert "<dt>Effect</dt><dd>A bell rings.</dd>" in content
 
         await engine.shutdown()
 
@@ -215,7 +218,9 @@ def test_scenario_rejects_percentage_events_in_freeform_guidance(tmp_path: Path)
         )
 
         assert engine.state is GameState.SCENARIO_INJECTION
-        assert "dedicated chance event field" in sender.events_of_type("error")[-1].payload["msg"]
+        assert (
+            "chance-based event rule controls" in sender.events_of_type("error")[-1].payload["msg"]
+        )
 
     asyncio.run(run())
 

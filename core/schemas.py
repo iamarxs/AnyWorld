@@ -183,7 +183,6 @@ class ActionInput(StrictModel):
 class ScenarioInput(StrictModel):
     scenario: str = Field(min_length=1, max_length=20000)
     guidance: str = Field(default="", max_length=5000)
-    chance_event: str = Field(default="", max_length=1000)
     chance_rule: StructuredChanceRule | None = None
 
 

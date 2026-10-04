@@ -1,6 +1,6 @@
 "use strict";
 const SCENARIO_STORAGE_KEY = "artificialDungeonScenarios";
-const scenarioFields = ["scenario", "guidance", "chanceEvent", "chancePercent", "chanceCadence",
+const scenarioFields = ["scenario", "guidance", "chancePercent", "chanceCadence",
     "chanceTrigger", "chanceEligibility", "chanceEffect", "chanceScope"];
 const scenarioLibrary = {
     list: document.getElementById("saved-scenarios"),

@@ -19,7 +19,6 @@ const elements = {
     scenarioStep: document.getElementById("scenario-step"),
     scenarioForm: document.getElementById("scenario-form"),
     scenario: document.getElementById("scenario-input"),
-    chanceEvent: document.getElementById("chance-event-input"),
     chancePercent: document.getElementById("chance-percent"),
     chanceCadence: document.getElementById("chance-cadence"),
     chanceTrigger: document.getElementById("chance-trigger"),

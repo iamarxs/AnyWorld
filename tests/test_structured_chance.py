@@ -6,8 +6,14 @@ import pytest
 from pydantic import ValidationError
 
 from core.config import settings
-from core.schemas import StructuredChanceRule, ChanceTriggerPlan, DicePlan, RoundResolution
-from logic.dice import structured_rule_text, validate_legacy_rule, roll_chance
+from core.schemas import (
+    ScenarioInput,
+    StructuredChanceRule,
+    ChanceTriggerPlan,
+    DicePlan,
+    RoundResolution,
+)
+from logic.dice import structured_rule_text, roll_chance
 from logic.llm_manager import LLMContextManager
 from support import FakeClient, memory
 
@@ -54,10 +60,6 @@ def test_explicit_trigger_and_percent_boundaries():
         )
     with pytest.raises(ValidationError, match="extra percentages"):
         rule(eligibility="Another 20% rule")
-    for text in ("A 40% chance a bell rings", "40% per round when someone enters"):
-        with pytest.raises(ValueError, match="ambiguous"):
-            validate_legacy_rule(text)
-    validate_legacy_rule("40% per round a bell rings")
 
 
 @pytest.mark.parametrize("stale_memory", [False, True])
@@ -217,3 +219,8 @@ def test_maximum_rule_text_survives_scenario_setup_and_round(tmp_path, cadence):
         await engine.shutdown()
 
     asyncio.run(run())
+
+
+def test_scenario_rejects_removed_legacy_field():
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        ScenarioInput(scenario="A tower", chance_event="40% per round a bell rings")

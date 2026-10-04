@@ -25,28 +25,16 @@ def private_chance_rule(guidance: str) -> tuple[str, int] | None:
     return rule
 
 
-def combine_private_guidance(guidance: str, chance_event: str = "") -> str:
-    """Validate the single optional chance field and combine it with freeform guidance."""
+def combine_private_guidance(guidance: str, rule: StructuredChanceRule | None = None) -> str:
+    """Combine freeform guidance with the validated structured chance rule."""
     if re.search(r"%|\bpercent(?:age)?\b|\bper\s+cent\b", guidance, re.IGNORECASE):
         raise ValueError(
-            "Freeform DM guidance cannot contain percentage events. Put one optional "
-            "percentage-based event in the dedicated chance event field."
+            "Freeform DM guidance cannot contain percentage events. "
+            "Use the chance-based event rule controls."
         )
-    if not chance_event:
-        return guidance
-    if "\n" in chance_event or "\r" in chance_event:
-        raise ValueError("'chance_event' must be a single line")
-    matches = re.findall(r"([+-]?\d+(?:[.,]\d+)?)\s*(?:%|percent\b)", chance_event, re.IGNORECASE)
-    if (
-        len(matches) != 1
-        or not matches[0].isdigit()
-        or not 0 <= int(matches[0]) <= 100
-        or private_chance_rule(chance_event) is None
-    ):
-        raise ValueError(
-            "'chance_event' must contain exactly one whole-number percentage from 0 to 100."
-        )
-    return "\n".join(part for part in (guidance, chance_event) if part)
+    return "\n".join(
+        part for part in (guidance, structured_rule_text(rule) if rule else "") if part
+    )
 
 
 def _is_per_round_rule(instruction: str) -> bool:
@@ -201,14 +189,6 @@ def structured_rule_text(rule: StructuredChanceRule) -> str:
     return (
         f"{rule.chance_percent}% {cadence}; scope: {rule.scope}{eligibility}; effect: {rule.effect}"
     )
-
-
-def validate_legacy_rule(text: str) -> None:
-    """Require host correction for mixed or missing legacy cadence."""
-    if text and (_is_per_round_rule(text) == _has_conditional_trigger(text)):
-        raise ValueError(
-            "Legacy chance text has ambiguous cadence. Use the structured rule controls."
-        )
 
 
 def chance_events_from_decision(

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Anyworld</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=23">
+  <link rel="stylesheet" href="/static/css/style.css?v=24">
   <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
   <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
@@ -66,7 +66,11 @@
         <form id="scenario-form">
           <label for="scenario-input">Describe the setting, characters, and opening situation</label>
           <textarea id="scenario-input" maxlength="20000" required></textarea>
-          <fieldset><legend>One private chance rule (optional)</legend>
+          <fieldset aria-describedby="chance-rule-tips"><legend>Chance-based event rule (optional)</legend>
+            <p id="chance-rule-tips">Set the chance of an event happening and describe its effect.
+              Choose when to check, who is eligible, and whether to roll once for everyone or separately
+              for each eligible player. The roll is private; its outcome shapes the story.
+              Leave the chance blank to turn the rule off.</p>
             <div class="chance-field">
               <label for="chance-percent">Chance, whole percent (leave blank to disable)</label>
               <input id="chance-percent" type="number" min="0" max="100" step="1">
@@ -94,15 +98,6 @@
                 <option value="per_player">One roll per eligible player</option></select>
             </div>
           </fieldset>
-          <details><summary>Legacy chance text</summary>
-          <label for="chance-event-input">Explicit legacy rule (use instead of controls)</label>
-          <input id="chance-event-input" type="text" maxlength="1000" aria-describedby="chance-event-tips"
-            placeholder="Example: Add a 40% chance per round that a helpful stranger appears">
-          <div id="chance-event-tips">
-            Use one whole-number percentage from 0–100% and specify a trigger, such as
-            "when a player enters a building", or write "per round".
-            Ambiguous or mixed cadence requires correction.
-          </div></details>
           <label for="guidance-input">Additional freeform DM guidance (optional)</label>
           <textarea id="guidance-input" maxlength="5000" aria-describedby="guidance-tips"
             placeholder="Example: 'Keep the world coherent while steering toward eerie discoveries.'"></textarea>
@@ -111,9 +106,9 @@
             <ul>
               <li><strong>Story Guidance:</strong> Non-probabilistic instructions to steer the world or direction.
                 <em>Example: "Steer responses toward the absurd, as if the scenario happened in a universe that
-                  does not conform to basic logic."</em></li>
+                  does not conform to basic logic." or for comedic purposes: </em></li>
             </ul>
-            Only the dedicated field above may contain a percentage-based event. Python rolls that one event;
+            Use the chance-based event rule above for percentage-based events;
             the AI follows this guidance to shape the story.
           </div>
           <div id="scenario-library">
@@ -166,14 +161,14 @@
   <button id="retry-round-button" type="button" hidden>Retry paused round</button>
   <button id="reclaim-button" type="button" hidden>Reclaim this player</button>
   <div id="connection-status" role="status">Connecting...</div>
-  <script src="/static/js/state.js?v=recovery-6"></script>
+  <script src="/static/js/state.js?v=recovery-7"></script>
   <script src="/static/js/identity.js?v=recovery-4"></script>
   <script src="/static/js/rendering.js?v=recovery-5"></script>
   <script src="/static/js/transport.js?v=recovery-4"></script>
   <script src="/static/js/accessibility.js?v=recovery-2"></script>
   <script src="/static/js/journal.js?v=recovery-3"></script>
-  <script src="/static/js/scenarios.js?v=2"></script>
-  <script src="/static/js/app.js?v=recovery-8"></script>
+  <script src="/static/js/scenarios.js?v=3"></script>
+  <script src="/static/js/app.js?v=recovery-9"></script>
 </body>
 
 </html>

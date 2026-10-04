@@ -256,7 +256,6 @@ elements.scenarioForm.addEventListener("submit", (event) => {
     if (
         send("scenario_init", {
             scenario: elements.scenario.value.trim(),
-            chance_event: elements.chanceEvent.value.trim(),
             chance_rule: rule,
             guidance: elements.guidance.value.trim(),
         })
@@ -281,7 +280,6 @@ function structuredChanceRule() {
         (rule.cadence === "per_round" && rule.trigger)) {
         throw new Error("Specify an effect and an occurrence trigger only for conditional cadence.");
     }
-    if (elements.chanceEvent.value.trim()) throw new Error("Use controls or legacy text, not both.");
     return rule;
 }
 elements.endGameButton.addEventListener("click", () => {

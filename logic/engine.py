@@ -72,7 +72,6 @@ class GameEngine(LobbyMixin):
         self.original_scenario: str | None = None
         self.private_guidance = ""
         self.freeform_guidance = ""
-        self.chance_event = ""
         self.chance_rule = None
         self.current_scenario_state: str | None = None
         self.opening_scenario: str | None = None

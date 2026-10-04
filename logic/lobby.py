@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from core.config import settings
 from core.schemas import ClientPayload, ServerEvent, StructuredChanceRule
-from logic.dice import combine_private_guidance, structured_rule_text, validate_legacy_rule
+from logic.dice import combine_private_guidance
 from logic.models import GameState, Player
 from logic.validation import clean_optional_text, clean_text
 
@@ -176,19 +176,12 @@ class LobbyMixin:
         """Accept the host's scenario and launch its preparation job."""
         scenario = clean_text(data.get("scenario"), "scenario", 20_000)
         guidance = clean_optional_text(data.get("guidance"), "guidance", 5_000)
-        chance_event = clean_optional_text(data.get("chance_event"), "chance_event", 1_000)
         rule = (
             StructuredChanceRule.model_validate(data["chance_rule"])
             if data.get("chance_rule")
             else None
         )
-        if rule is not None:
-            if chance_event:
-                raise ValueError("Use either structured chance controls or legacy text, not both.")
-            chance_event = structured_rule_text(rule)
-        else:
-            validate_legacy_rule(chance_event)
-        private_guidance = combine_private_guidance(guidance, chance_event)
+        private_guidance = combine_private_guidance(guidance, rule)
         async with self.lock:
             if not CURRENT_OWNER.get()():
                 return
@@ -205,7 +198,6 @@ class LobbyMixin:
                     private_guidance,
                     rule,
                     freeform_guidance=guidance,
-                    chance_event=chance_event,
                 ),
                 GameState.SCENARIO_INJECTION,
             )
@@ -219,7 +211,6 @@ class LobbyMixin:
         rule: StructuredChanceRule | None = None,
         *,
         freeform_guidance: str = "",
-        chance_event: str = "",
     ) -> None:
         """Generate only the title and open the lobby for players."""
         self.resolver.set_genesis(scenario, guidance)
@@ -233,7 +224,6 @@ class LobbyMixin:
                 self.original_scenario = scenario
                 self.private_guidance = guidance
                 self.freeform_guidance = freeform_guidance
-                self.chance_event = chance_event
                 self.chance_rule = rule
                 self.scenario_title = title
                 self.state = GameState.AWAITING_PLAYERS
@@ -277,7 +267,6 @@ class LobbyMixin:
                     resolution.global_narrative,
                     opening_scenario=self.original_scenario,
                     private_guidance=self.freeform_guidance,
-                    chance_event=self.chance_event,
                     chance_rule=self.chance_rule,
                 )
                 async with self.lock:

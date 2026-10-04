@@ -85,36 +85,21 @@ def test_invalid_probability_rejected(percentage):
 
 
 @pytest.mark.parametrize(
-    "guidance,chance_event,match",
+    "guidance",
     [
-        ("Keep the tone eerie.", "Add a 40% chance every round that a bell rings.", None),
-        ("Add a 20% chance every round that a bell rings.", "", "Freeform"),
-        ("Add a forty percent chance that a bell rings.", "", "Freeform"),
-        ("There is a 40 per cent chance a bell rings.", "", "Freeform"),
-        ("Use the phrase percentage chance in the narration.", "", "Freeform"),
-        (
-            "Keep the tone eerie.",
-            "Add a 20% chance and a 30% chance that a bell rings.",
-            "exactly one",
-        ),
-        (
-            "Keep the tone eerie.",
-            "Add a 20.5% chance that a bell rings.",
-            "whole-number",
-        ),
-        ("Keep the tone eerie.", "Add a 20% chance\nthat a bell rings.", "single line"),
+        "Add a 20% chance every round that a bell rings.",
+        "Add a forty percent chance that a bell rings.",
+        "There is a 40 per cent chance a bell rings.",
+        "Use the phrase percentage chance in the narration.",
     ],
 )
-def test_scenario_guidance_accepts_at_most_one_dedicated_chance_event(
-    guidance, chance_event, match
-):
-    if match:
-        with pytest.raises(ValueError, match=match):
-            dice.combine_private_guidance(guidance, chance_event)
-    else:
-        assert dice.combine_private_guidance(guidance, chance_event) == (
-            guidance + "\n" + chance_event
-        )
+def test_freeform_guidance_rejects_percentage_events(guidance):
+    with pytest.raises(ValueError, match="Freeform"):
+        dice.combine_private_guidance(guidance)
+
+
+def test_guidance_without_chance_rule():
+    assert dice.combine_private_guidance("Keep the tone eerie.") == "Keep the tone eerie."
 
 
 @pytest.mark.parametrize(
@@ -140,7 +125,16 @@ def test_multiple_percentage_rules_are_rejected_but_freeform_guidance_is_unchang
             RULE + "\nAdd a 40% chance every round that a stranger helps the party."
         )
     guidance = "Keep the tone eerie.\nIntroduce new NPCs when the story stalls."
-    assert dice.combine_private_guidance(guidance, RULE) == guidance + "\n" + RULE
+    rule = dice.StructuredChanceRule(
+        chance_percent=20,
+        cadence="condition",
+        trigger="A building is entered",
+        effect="It collapses on the player",
+        scope="per_player",
+    )
+    assert dice.combine_private_guidance(guidance, rule) == (
+        guidance + "\n" + dice.structured_rule_text(rule)
+    )
     schema = participant_schema(DicePlan, ("Host",), False).model_json_schema()
     assert schema["properties"]["chance_events"]["maxItems"] == 0
     assert "chance_rule_decisions" not in schema["properties"]

@@ -30,7 +30,6 @@ class GameTranscript:
         opening_scenario: str = "",
         private_guidance: str = "",
         *,
-        chance_event: str = "",
         chance_rule: StructuredChanceRule | None = None,
     ) -> None:
         """Archive the host scenario and private guidance before the opening state."""
@@ -80,8 +79,6 @@ class GameTranscript:
                 + "".join(f"<dt>{label}</dt><dd>{escape(value)}</dd>" for label, value in details)
                 + "</dl>\n"
             )
-        elif chance_event:
-            chance_html = "<h3>Chance event</h3>\n" f'<p class="state">{escape(chance_event)}</p>\n'
         guidance_html = (
             "<h2>Private DM guidance</h2>\n" + guidance_html + chance_html
             if guidance_html or chance_html
