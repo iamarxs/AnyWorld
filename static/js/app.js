@@ -23,7 +23,6 @@ function handleMessage(message, replayed = false) {
     }
     if (type === "auth_ok") {
         clientSession.liveEvents = [];
-        clientSession.liveEvents = [];
         if (payload.session_id && payload.session_id !== clientSession.sessionId) {
             clientSession.replaying = false;
             resetJournalRequests();
@@ -150,7 +149,7 @@ function handleMessage(message, replayed = false) {
     } else if (type === "token_usage") {
         elements.tokenUsage.hidden = false;
         elements.tokenUsage.title = payload.counting_method || "Estimated token usage";
-        const used = Math.max(0, Number(payload.retained_context_tokens ?? payload.approximate_tokens) || 0);
+        const used = Math.max(0, Number(payload.retained_context_tokens) || 0);
         const limit = Math.max(1, Number(payload.context_window_size) || used || 1);
         const ratio = Math.min(1, used / limit);
         elements.tokenChart.style.background =

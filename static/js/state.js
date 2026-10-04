@@ -5,7 +5,7 @@ const clientSession = {
  reconnectAttempts: 0, reconnectTimer: null, authenticated: false, isHost: false,
  scenarioSubmitting: false, lastStartedRound: 0, sessionId: null, cursor: 0,
  pendingAction: null, draftSessionId: null, replaced: false, replaying: false, roundNumber: null,
- seenEvents: new Set(), renderedRounds: new Set(),
+ renderedRounds: new Set(),
  replaySnapshot: null, liveEvents: [], historyCursor: 0, exportEvents: [],
 };
 const elements = {
