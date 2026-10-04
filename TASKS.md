@@ -210,6 +210,21 @@ Existing history/benchmark observations are retained and were not independently 
 
 ## Done
 
+- [x] ~~P2 - Keep public History in memory with manual JSONL export~~ (2026-10-04)
+  - Removed automatic `.public_games/` writes and disk archive recovery. Full public event
+    history remains in memory for the current game, with replay, pagination, search and browser
+    JSONL export preserved. Starting a new game or restarting the server clears that history.
+  - Regression coverage checks no filesystem access, more than 3,500 retained events, privacy,
+    response-size limits, retry/cancellation ordering, and export requests after End.
+
+- [x] ~~P3 - Structure private guidance in HTML transcripts~~ (2026-10-04)
+  - Added Freeform guidance and Chance event subtitles. Structured events show labeled chance,
+    timing, scope, optional trigger, eligibility and effect with readable config values.
+  - Legacy chance rules keep their original text under their own subtitle. Guidance and chance
+    text remain escaped and private; the combined resolver context is unchanged.
+  - Validation for both changes above: 386 Python tests and 22 Node client tests passed;
+    Black, Flake8 and diff whitespace checks passed. No live inference was run.
+
 - [x] ~~P2 - Clean up Start new game after ENDED~~ (2026-10-04)
   - The host retains its authenticated identity and returns to scenario creation with a fresh
     engine, resolver and public journal. Previous players disconnect and must explicitly rejoin;

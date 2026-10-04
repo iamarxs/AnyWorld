@@ -1,7 +1,8 @@
 """Public replay excludes private data and action IDs are idempotent."""
 
 import asyncio
-import pytest
+import json
+from pathlib import Path
 
 from core.schemas import ServerEvent
 from logic.journal import PublicJournal
@@ -29,8 +30,9 @@ def test_journal_projection_pagination_and_search():
         second = await journal.page(first["cursor"], 2, "")
         assert len(second["events"]) == 1 and not second["has_more"]
         assert len((await journal.page(0, 100, "Gate 1"))["events"]) == 1
-        assert "secret" not in journal.path.read_text()
-        assert "hidden_rolls" not in journal.path.read_text()
+        exported = json.dumps(first["events"] + second["events"])
+        assert "secret" not in exported
+        assert "hidden_rolls" not in exported
 
     asyncio.run(run())
 
@@ -62,57 +64,68 @@ def test_duplicate_action_acknowledgment_and_complete_snapshot(tmp_path):
     asyncio.run(run())
 
 
-def test_journal_disk_failure_replays_bounded_pending_events_once(monkeypatch):
+def test_full_history_is_retained_without_creating_files(tmp_path, monkeypatch):
+    def forbid_files(*args, **kwargs):
+        raise AssertionError("Public history must not access files")
+
+    monkeypatch.setattr(Path, "open", forbid_files)
+    monkeypatch.setattr(Path, "mkdir", forbid_files)
+
     async def run():
-        journal = PublicJournal("session-test")
-        append = journal._append_batch
-
-        def fail(events):
-            raise OSError("injected failure")
-
-        monkeypatch.setattr(journal, "_append_batch", fail)
-        first = await journal.record(
-            ServerEvent(type="chat_echo", payload={"name": "Alice", "chat": "Hello"})
-        )
-        assert first.payload["event_id"] == 1
-        assert len((await journal.page(0, 100, ""))["events"]) == 1
-        monkeypatch.setattr(journal, "_append_batch", append)
-        await journal.record(ServerEvent(type="round_start", payload={"round_number": 1}))
-        page = await journal.page(0, 100, "")
-        assert [event["payload"]["event_id"] for event in page["events"]] == [1, 2]
-        assert not journal._pending
-        assert len(journal.path.read_text().splitlines()) == 2
-
-    asyncio.run(run())
-
-
-@pytest.mark.parametrize("loss", ["missing", "tail", "gap"])
-@pytest.mark.parametrize("search", ["", "Hello", "no matches"])
-def test_archive_loss_reports_incomplete_and_does_not_invent_tail_cursor(loss, search):
-    async def run():
-        journal = PublicJournal("lost-history")
-        for number in range(4):
-            await journal.record(ServerEvent(type="chat_echo", payload={"chat": f"Hello {number}"}))
-        lines = journal.path.read_text(encoding="utf-8").splitlines(True)
-        if loss == "missing":
-            journal.path.unlink()
-        else:
-            journal.path.write_text(
-                "".join(lines[:2] if loss == "tail" else [lines[0], *lines[2:]]), encoding="utf-8"
+        journal = PublicJournal("memory-session")
+        for number in range(3501):
+            await journal.record(
+                ServerEvent(type="chat_echo", payload={"chat": f"{number}:" + "x" * 1000})
             )
+        identities = []
         after = 0
         while True:
-            page = await journal.page(after, 1, search)
+            page = await journal.page(after, 100, "")
+            identities.extend(event["payload"]["event_id"] for event in page["events"])
+            assert not page["incomplete"]
+            assert page["latest_event_id"] == 3501
             after = page["cursor"]
             if not page["has_more"]:
                 break
-        assert page["incomplete"] and page["latest_event_id"] == 4
-        assert after == {"missing": 0, "tail": 2, "gap": 4}[loss]
+        assert identities == list(range(1, 3502))
+        assert not (tmp_path / ".public_games").exists()
 
     asyncio.run(run())
 
 
-def test_search_filtering_and_empty_new_archive_are_complete():
+def test_record_retries_are_idempotent_and_pages_are_independent():
+    async def run():
+        journal = PublicJournal("retry-session")
+        event = ServerEvent(type="chat_echo", payload={"name": "Alice", "chat": "Hello"})
+        await journal.record(event)
+        await journal.record(event)
+        page = await journal.page(0, 100, "")
+        assert len(page["events"]) == page["latest_event_id"] == 1
+        page["events"][0]["payload"]["chat"] = "Changed"
+        event.payload["chat"] = "Changed too"
+        assert (await journal.page(0, 100, ""))["events"][0]["payload"]["chat"] == "Hello"
+        # A new journal cannot recover a previous game's in-memory history.
+        assert (await PublicJournal("retry-session").page(0, 100, ""))["events"] == []
+
+    asyncio.run(run())
+
+
+def test_pages_stay_bounded_by_bytes():
+    async def run():
+        journal = PublicJournal("large-events")
+        for _ in range(2):
+            await journal.record(
+                ServerEvent(type="state_update", payload={"global_narrative": "x" * 300000})
+            )
+        first = await journal.page(0, 100, "")
+        assert len(first["events"]) == 1 and first["has_more"] and first["cursor"] == 1
+        second = await journal.page(first["cursor"], 100, "")
+        assert len(second["events"]) == 1 and not second["has_more"]
+
+    asyncio.run(run())
+
+
+def test_search_filtering_and_empty_new_journal_are_complete():
     async def run():
         journal = PublicJournal("filtered-history")
         assert not (await journal.page(0, 1, ""))["incomplete"]
@@ -120,5 +133,24 @@ def test_search_filtering_and_empty_new_archive_are_complete():
             await journal.record(ServerEvent(type="chat_echo", payload={"chat": str(number)}))
         page = await journal.page(0, 1, "no matches")
         assert not page["incomplete"] and page["cursor"] == 4
+
+    asyncio.run(run())
+
+
+def test_history_export_requests_work_after_end_without_public_files(tmp_path):
+    async def run():
+        engine, sender, _ = await build_started_game(tmp_path)
+        await engine.process_payload("host", payload("chat", message="Export this chat"))
+        await engine.shutdown()
+        await engine.process_payload(
+            "host", payload("journal_request", mode="export", after=0, limit=100, search="")
+        )
+        page = sender.events_of_type("journal_page")[-1].payload
+        assert page["mode"] == "export" and not page["has_more"]
+        assert page["session_id"] == engine.session_id
+        assert page["events"][-1]["type"] == "game_ended"
+        assert any(event["payload"].get("chat") == "Export this chat" for event in page["events"])
+        assert not (tmp_path / ".public_games").exists()
+        assert engine.transcript.path.is_file()
 
     asyncio.run(run())

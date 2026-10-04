@@ -7,7 +7,7 @@ from html import escape
 from pathlib import Path
 import re
 
-from core.schemas import ChanceEventResult, RoundResolution
+from core.schemas import ChanceEventResult, RoundResolution, StructuredChanceRule
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +24,14 @@ class GameTranscript:
         self._io_lock = asyncio.Lock()
 
     async def start(
-        self, title: str, initial_state: str, opening_scenario: str = "", private_guidance: str = ""
+        self,
+        title: str,
+        initial_state: str,
+        opening_scenario: str = "",
+        private_guidance: str = "",
+        *,
+        chance_event: str = "",
+        chance_rule: StructuredChanceRule | None = None,
     ) -> None:
         """Archive the host scenario and private guidance before the opening state."""
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")[:80]
@@ -35,8 +42,49 @@ class GameTranscript:
             else ""
         )
         guidance_html = (
-            "<h2>Private DM guidance</h2>\n" f'<p class="state">{escape(private_guidance)}</p>\n'
+            "<h3>Freeform guidance</h3>\n" f'<p class="state">{escape(private_guidance)}</p>\n'
             if private_guidance
+            else ""
+        )
+        chance_html = ""
+        if chance_rule is not None:
+            details = [
+                ("Chance", f"{chance_rule.chance_percent}%"),
+                (
+                    "Timing",
+                    (
+                        "Every round"
+                        if chance_rule.cadence == "per_round"
+                        else "When the trigger occurs"
+                    ),
+                ),
+                (
+                    "Scope",
+                    (
+                        "Shared event for the party"
+                        if chance_rule.scope == "shared"
+                        else "Separate event for each eligible player"
+                    ),
+                ),
+            ]
+            if chance_rule.trigger:
+                details.append(("Trigger", chance_rule.trigger))
+            details.extend(
+                [
+                    ("Eligibility", chance_rule.eligibility or "No additional restrictions"),
+                    ("Effect", chance_rule.effect),
+                ]
+            )
+            chance_html = (
+                '<h3>Chance event</h3>\n<dl class="state">'
+                + "".join(f"<dt>{label}</dt><dd>{escape(value)}</dd>" for label, value in details)
+                + "</dl>\n"
+            )
+        elif chance_event:
+            chance_html = "<h3>Chance event</h3>\n" f'<p class="state">{escape(chance_event)}</p>\n'
+        guidance_html = (
+            "<h2>Private DM guidance</h2>\n" + guidance_html + chance_html
+            if guidance_html or chance_html
             else ""
         )
         document = f"""<!doctype html>

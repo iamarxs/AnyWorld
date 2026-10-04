@@ -20,7 +20,6 @@ def test_committed_round_delivery_survives_prepublication_failure(tmp_path, monk
         engine, sender, resolver = await setup(tmp_path)
         settings.llm.request_timeout_seconds = 0.02
         entered = asyncio.Event()
-        loop = asyncio.get_running_loop()
         commits = []
         original_commit = resolver.commit_resolution
 
@@ -46,18 +45,16 @@ def test_committed_round_delivery_survives_prepublication_failure(tmp_path, monk
 
             monkeypatch.setattr(resolver, "complete_round_debug", debug)
         else:
-            append = engine.journal._append_batch
+            record = engine.journal.record
 
-            def delayed(events):
-                if any(
-                    event.type == "state_update" and event.payload.get("round_number") == 1
-                    for event in events
-                ):
-                    loop.call_soon_threadsafe(entered.set)
-                    time.sleep(0.12)
-                append(events)
+            async def delayed(event):
+                recorded = await record(event)
+                if event.type == "state_update" and event.payload.get("round_number") == 1:
+                    entered.set()
+                    await asyncio.sleep(0.12)
+                return recorded
 
-            monkeypatch.setattr(engine.journal, "_append_batch", delayed)
+            monkeypatch.setattr(engine.journal, "record", delayed)
         await submit_round(engine)
         chat = None
         if phase == "journal_chat":

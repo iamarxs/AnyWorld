@@ -3,7 +3,9 @@
 import asyncio
 from pathlib import Path
 
-from core.schemas import RoundResolution
+import pytest
+
+from core.schemas import RoundResolution, StructuredChanceRule
 from logic import dice
 from logic.transcript import GameTranscript
 
@@ -45,6 +47,55 @@ def test_html_transcript_escapes_content_and_finalizes(tmp_path: Path) -> None:
         assert "A &lt;cabin&gt; &amp; a river.\nFind a way home." in content
         assert content.index("Original scenario prompt") < content.index("Opening scenario")
         assert content.endswith("</html>\n")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("cadence", ["per_round", "condition"])
+@pytest.mark.parametrize("scope", ["shared", "per_player"])
+def test_private_guidance_has_subtitles_and_readable_chance_settings(tmp_path, cadence, scope):
+    async def run():
+        rule = StructuredChanceRule(
+            chance_percent=15,
+            cadence=cadence,
+            trigger="Enter <cave> & inspect" if cadence == "condition" else "",
+            eligibility="Players with <tools>" if cadence == "condition" else "",
+            effect="Bosco helps <players> & leaves.",
+            scope=scope,
+        )
+        transcript = GameTranscript(tmp_path)
+        await transcript.start(
+            "Quest",
+            "Opening",
+            private_guidance="Find caches.\n\nA <dwarf> appears.",
+            chance_rule=rule,
+        )
+        content = transcript.path.read_text(encoding="utf-8")
+        assert content.index("Freeform guidance") < content.index("Chance event")
+        assert "Find caches.\n\nA &lt;dwarf&gt; appears." in content
+        assert "<dt>Chance</dt><dd>15%</dd>" in content
+        timing = "Every round" if cadence == "per_round" else "When the trigger occurs"
+        assert f"<dt>Timing</dt><dd>{timing}</dd>" in content
+        expected_scope = (
+            "Shared event for the party"
+            if scope == "shared"
+            else "Separate event for each eligible player"
+        )
+        assert f"<dt>Scope</dt><dd>{expected_scope}</dd>" in content
+        assert "<dt>Effect</dt><dd>Bosco helps &lt;players&gt; &amp; leaves.</dd>" in content
+        if cadence == "condition":
+            assert "<dt>Trigger</dt><dd>Enter &lt;cave&gt; &amp; inspect</dd>" in content
+            assert "<dt>Eligibility</dt><dd>Players with &lt;tools&gt;</dd>" in content
+        else:
+            assert "<dt>Trigger</dt>" not in content
+            assert "<dt>Eligibility</dt><dd>No additional restrictions</dd>" in content
+        chance_only = GameTranscript(tmp_path)
+        await chance_only.start("Chance only", "Opening", chance_rule=rule)
+        content = chance_only.path.read_text(encoding="utf-8")
+        assert "Private DM guidance" in content and "Chance event" in content
+        assert "Freeform guidance" not in content
+        await transcript.finalize()
+        await chance_only.finalize()
 
     asyncio.run(run())
 

@@ -71,6 +71,8 @@ class GameEngine(LobbyMixin):
         self.scenario_title: str | None = None
         self.original_scenario: str | None = None
         self.private_guidance = ""
+        self.freeform_guidance = ""
+        self.chance_event = ""
         self.chance_rule = None
         self.current_scenario_state: str | None = None
         self.opening_scenario: str | None = None
@@ -90,21 +92,18 @@ class GameEngine(LobbyMixin):
             self.pending_delivery.popleft()
 
     async def _broadcast(self, event: ServerEvent) -> None:
-        # Preserve journal/broadcast order even when party chat arrives during a
-        # cancelled journal write. This lock never spans inference or transcripts.
+        # Preserve journal/broadcast order, including cancellation and concurrent chat.
+        # This lock never spans inference or transcripts.
         async with self.publication_lock:
             try:
-                try:
-                    event = await self.journal.record(event)
-                except OSError:
-                    LOGGER.exception("Public journal write failed")
+                event = await self.journal.record(event)
                 await self._publish_recorded(event)
             except asyncio.CancelledError:
                 if event.payload.get("session_id") == self.session_id and event.payload.get(
                     "event_id"
                 ):
-                    # record() waits for its worker on cancellation and keeps the
-                    # assigned identity. Finish its delivery before later IDs pass it.
+                    # Recorded events retain their identity after cancellation.
+                    # Finish delivery before later IDs pass it.
                     await self._publish_recorded(event)
                 raise
 

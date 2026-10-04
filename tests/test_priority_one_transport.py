@@ -404,21 +404,16 @@ def test_long_history_has_independent_budget_and_retriable_page(monkeypatch, mod
                 host.send_json({"event_type": "chat", "data": {"message": f"Chat {number}"}})
                 receive_until(host, "chat_echo")
             journal = app.state.engine.journal
-            # Seed the remaining archive in one batch; all gateway traffic still
+            # Seed the remaining history in memory; all gateway traffic still
             # travels through the real ASGI socket and admission policy.
-            events = tuple(
-                ServerEvent(
-                    type="chat_echo",
-                    payload={
-                        "chat": f"Archived {number}",
-                        "session_id": journal.session_id,
-                        "event_id": number,
-                    },
-                )
-                for number in range(journal.cursor + 1, 3102)
-            )
-            journal._append_batch(events)
-            journal.cursor = 3101
+
+            async def seed_history():
+                for number in range(journal.cursor + 1, 3102):
+                    await journal.record(
+                        ServerEvent(type="chat_echo", payload={"chat": f"History {number}"})
+                    )
+
+            client.portal.call(seed_history)
             cursor = 0
             received = []
             for _ in range(30):

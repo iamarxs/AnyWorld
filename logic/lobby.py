@@ -188,7 +188,7 @@ class LobbyMixin:
             chance_event = structured_rule_text(rule)
         else:
             validate_legacy_rule(chance_event)
-        guidance = combine_private_guidance(guidance, chance_event)
+        private_guidance = combine_private_guidance(guidance, chance_event)
         async with self.lock:
             if not CURRENT_OWNER.get()():
                 return
@@ -198,7 +198,15 @@ class LobbyMixin:
             if self.state is not GameState.SCENARIO_INJECTION:
                 raise ValueError("The scenario cannot be changed in the current state.")
             self._launch_job_locked(
-                lambda epoch: self._prepare_scenario(epoch, client_id, scenario, guidance, rule),
+                lambda epoch: self._prepare_scenario(
+                    epoch,
+                    client_id,
+                    scenario,
+                    private_guidance,
+                    rule,
+                    freeform_guidance=guidance,
+                    chance_event=chance_event,
+                ),
                 GameState.SCENARIO_INJECTION,
             )
 
@@ -209,6 +217,9 @@ class LobbyMixin:
         scenario: str,
         guidance: str,
         rule: StructuredChanceRule | None = None,
+        *,
+        freeform_guidance: str = "",
+        chance_event: str = "",
     ) -> None:
         """Generate only the title and open the lobby for players."""
         self.resolver.set_genesis(scenario, guidance)
@@ -221,6 +232,8 @@ class LobbyMixin:
                     return
                 self.original_scenario = scenario
                 self.private_guidance = guidance
+                self.freeform_guidance = freeform_guidance
+                self.chance_event = chance_event
                 self.chance_rule = rule
                 self.scenario_title = title
                 self.state = GameState.AWAITING_PLAYERS
@@ -263,7 +276,9 @@ class LobbyMixin:
                     self.scenario_title or "Untitled Session",
                     resolution.global_narrative,
                     opening_scenario=self.original_scenario,
-                    private_guidance=self.private_guidance,
+                    private_guidance=self.freeform_guidance,
+                    chance_event=self.chance_event,
+                    chance_rule=self.chance_rule,
                 )
                 async with self.lock:
                     if not self._job_current(epoch):

@@ -179,6 +179,14 @@ def test_scenario_uses_one_separate_chance_event_and_freeform_guidance(
             "Keep the tone eerie.\nAdd a 40% chance every round that a bell rings."
         )
         assert sender.events_of_type("scenario_ready")
+        await engine.process_payload("host", payload("start_game"))
+        await engine.wait_for_inference()
+        content = engine.transcript.path.read_text(encoding="utf-8")
+        assert '<h3>Freeform guidance</h3>\n<p class="state">Keep the tone eerie.</p>' in content
+        assert (
+            '<h3>Chance event</h3>\n<p class="state">'
+            "Add a 40% chance every round that a bell rings.</p>"
+        ) in content
 
         await engine.shutdown()
 

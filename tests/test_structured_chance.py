@@ -208,7 +208,12 @@ def test_maximum_rule_text_survives_scenario_setup_and_round(tmp_path, cadence):
         await engine.wait_for_inference()
         assert engine.round_counter == 1 and not engine.round_paused
         assert not sender.events_of_type("error")
-        assert structured_rule_text(spec) in engine.transcript.path.read_text(encoding="utf-8")
+        content = engine.transcript.path.read_text(encoding="utf-8")
+        assert "<dt>Chance</dt><dd>0%</dd>" in content
+        assert spec.eligibility in content and spec.effect in content
+        if spec.trigger:
+            assert spec.trigger in content
+        assert structured_rule_text(spec) not in content.split("</header>", 1)[0]
         await engine.shutdown()
 
     asyncio.run(run())
