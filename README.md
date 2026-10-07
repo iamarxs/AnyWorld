@@ -6,8 +6,10 @@ A multiplayer text adventure where you never have to roll dice or keep score —
 character does. One player (the host) describes the scenario, then everyone takes turns acting in
 their own words while an AI weaves every choice into a story that keeps unfolding.
 
-### What's new (2026-10-04)
+### What's new (2026-10-07)
 
+- Docker compose: Easily configure and run the game via docker compose. Use either local or cloud AI backend with a temporary cloudflare tunnel and URL, no network configuration required.
+- Scenario save/load now possible into files as well.
 - Save and reuse scenarios: The host can save, load, and delete scenarios in their browser. Scenarios are stored in the browser's localStorage and stay completely local.
 - Start another adventure: After ending a game, the host can create a new scenario without restarting the server.
 - Browse and export History: Easily search previous public events for forgotten details. Also exportable as JSONL.
