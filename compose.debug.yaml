@@ -1,0 +1,7 @@
+services:
+  game:
+    environment:
+      AD_LLM__DEBUG_RAW_RESPONSES: "true"
+    volumes:
+      - ./data/debug:/app/.debug
+

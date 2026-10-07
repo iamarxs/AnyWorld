@@ -1,0 +1,7 @@
+# Select this instead of compose.llama.yaml; it defines no local backend or model cache.
+services:
+  game:
+    environment:
+      AD_LLM__PROVIDER: openai
+      AD_LLM__MODEL_NAME: ${OPENAI_MODEL:?Select an OpenAI model in docker.env}
+      AD_OPENAI_API_KEY: ${AD_OPENAI_API_KEY:?Set your OpenAI API key in docker.env}

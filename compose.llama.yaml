@@ -1,0 +1,101 @@
+# NVIDIA local inference; edit the argument list for llama-server tuning.
+services:
+  llama:
+    image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: missing
+    restart: unless-stopped
+    init: true
+    environment:
+      LLAMA_CACHE: /models
+      HF_TOKEN: ${HF_TOKEN:-}
+      LLAMA_ARG_HF_REPO: ${HF_REPO:?Select a Hugging Face repository in docker.env}
+      LLAMA_ARG_HF_FILE: ${HF_FILE:?Select an exact GGUF filename in docker.env}
+      LLAMA_ARG_ALIAS: ${MODEL_ALIAS:-local}
+    command:
+    - --fit-ctx
+    - '131072'
+    - --fit-target
+    - '0'
+    - -ngl
+    - '99'
+    - -np
+    - '1'
+    - --threads
+    - '6'
+    - -fa
+    - 'on'
+    - --load-mode
+    - mlock
+    - -b
+    - '2048'
+    - -ub
+    - '1024'
+    - -ctk
+    - q8_0
+    - -ctv
+    - q8_0
+    - --temp
+    - '1.0'
+    - --top-p
+    - '0.95'
+    - --top-k
+    - '20'
+    - --min-p
+    - '0.0'
+    - --presence-penalty
+    - '0.0'
+    - --repeat-penalty
+    - '1.0'
+    - --reasoning-budget
+    - '-1'
+    - --context-shift
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8033'
+    - --no-webui
+    - --jinja
+    - --chat-template-file
+    - /templates/chat.jinja
+    - --no-mmproj
+    volumes:
+    - models:/models
+    - type: bind
+      source: ${CHAT_TEMPLATE_FILE:?Set CHAT_TEMPLATE_FILE to the canonical Jinja template}
+      target: /templates/chat.jinja
+      read_only: true
+      bind:
+        create_host_path: false
+    networks:
+    - backend
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - --fail
+      - --silent
+      - --max-time
+      - '5'
+      - http://localhost:8033/health
+      interval: 10s
+      timeout: 6s
+      start_period: ${MODEL_STARTUP_TIMEOUT:-3600s}
+      retries: 6
+    stop_grace_period: 180s
+    gpus: all
+    cap_add:
+    - IPC_LOCK
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+  game:
+    depends_on:
+      llama:
+        condition: service_healthy
+    environment:
+      AD_LLM__PROVIDER: compatible
+      AD_LLM__ENDPOINT: http://llama:8033/v1
+      AD_LLM__MODEL_NAME: ${MODEL_ALIAS:-local}
+volumes:
+  models:

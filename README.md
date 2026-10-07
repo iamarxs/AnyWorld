@@ -6,8 +6,10 @@ A multiplayer text adventure where you never have to roll dice or keep score —
 character does. One player (the host) describes the scenario, then everyone takes turns acting in
 their own words while an AI weaves every choice into a story that keeps unfolding.
 
-### What's new (2026-10-04)
+### What's new (2026-10-07)
 
+- Docker compose: Easily configure and run the game via docker compose. Use either local or cloud AI backend with a temporary cloudflare tunnel and URL, no network configuration required.
+- Scenario save/load now possible into files as well.
 - Save and reuse scenarios: The host can save, load, and delete scenarios in their browser. Scenarios are stored in the browser's localStorage and stay completely local.
 - Start another adventure: After ending a game, the host can create a new scenario without restarting the server.
 - Browse and export History: Easily search previous public events for forgotten details. Also exportable as JSONL.
@@ -15,139 +17,119 @@ their own words while an AI weaves every choice into a story that keeps unfoldin
 
 ## Get started
 
-One person runs the game server and connects it to an AI model. Everyone plays in a browser.
-You need Python 3.11 or newer on the server. Anyworld supports a local llama.cpp backend and
-direct OpenAI API access; direct OpenAI operation has been tested live with `gpt-5.6-luna`.
-With the OpenAI backend, narration follows the language of the host's scenario, allowing
-non-English play. The local compatible backend currently requests English narration.
+If someone else is hosting, ask them for the game link and player password.
+You do not need to install Python, Docker or an AI model to join.
 
-`config.example.yaml` is an optional template to copy to your local `config.yaml`; it is not
-loaded automatically. Set distinct host and player passwords in the local configuration or
-through `AD_SERVER__HOST_PASSWORD` and `AD_SERVER__PLAYER_PASSWORD`. Environment values take
-precedence over YAML, and the project's `.env` file can supply these variables.
+If you are hosting, choose one setup guide:
 
-For the direct OpenAI backend, put `AD_OPENAI_API_KEY` in the project's `.env` file or process
-environment. An existing process value takes precedence over `.env`. The game ignores inherited
-`OPENAI_ORG_ID` and `OPENAI_PROJECT_ID` settings on its SDK clients to avoid conflicts with that
-key. Restart the server after changing credentials or configuration.
+| Setup                                                         | Guide                                           |
+| ------------------------------------------------------------- | ----------------------------------------------- |
+| Docker: run llama.cpp on your NVIDIA GPU, or use OpenAI       | [Docker Quick Startup](DOCKER.md#quick-startup) |
+| Python: run the game directly and connect it to an AI service | [Install and configure](INSTALL.md)             |
 
-See [INSTALL.md](INSTALL.md) for installation, passwords, model settings, backend switching,
-network access, and troubleshooting. Once installed and configured, run `anyworld` or `python app.py`
-from the repository directory, then open the local game page at https://127.0.0.1:4141/.
+**llama.cpp** runs an AI model on your computer. **OpenAI** runs the model on its
+servers and charges for API use. OpenAI narration follows the language of your
+scenario; the local backend currently requests English narration.
 
 ## How to play
 
-1. The host signs in first, using the host password, and writes a scenario. Include the setting
-   and the party's goal. The host may also add one optional percentage-based event and separate
-   freeform private DM guidance.
-2. The AI generates the scenario title. Players can then join using the player password. Everyone
-   sees the banner and the host-typed scenario prompt.
-3. When everyone is ready, the host clicks **Start Game**. The AI writes the **Opening scenario**,
-   introducing the joined characters and their roles while explaining the setting and goal.
-4. Players submit actions in join order. Once all actions are collected, the AI resolves them
-   together as one round. The shared result describes the consequences of player actions within
-   the world, and to them personally. Often new avenues to lead the plot to may appear.
-5. Use party chat at any time, including while the AI is responding. Chat is not sent to the AI.
-   If a round fails, the host can retry it with the same actions and dice, or end the game.
+1. The host opens the game link, enters a character name and the host password,
+   then describes the setting, characters and goal. Private guidance and a chance
+   rule are optional.
+2. Select **Generate scenario**. The AI creates a title. Other players can now
+   join with their names and the player password. They see the host's scenario.
+3. When everyone has joined, the host selects **Start Game**. The AI writes the
+   opening and introduces the characters.
+4. Players submit actions in the order they joined. After everyone has acted,
+   the AI describes the results together as one round.
+5. Use party chat at any time. Chat is visible to the party but is not sent to
+   the AI. If a round cannot finish, the host can retry it or end the game.
 
-The player limit includes the host. The server assigns idle actions to disconnected players
-so the game can continue. Story quality and consistency depend on the model;
-the game cannot guarantee that it follows every instruction perfectly.
+The player limit includes the host. Disconnected players receive idle actions
+when needed so the game can continue. Story quality depends on the model; it
+may make mistakes or forget details.
 
-## One private percentage event
+## Optional private chance rule
 
-Use the **One private chance rule (optional)** controls for one random event per game:
+The host can add a percentage- or trigger-based rule in **Chance-based event rule**. This adds unexpected
+developments: during play, players see the effects rather than the rule or rolls.
 
-| Control            | Meaning                                                               |
-| ------------------ | --------------------------------------------------------------------- |
-| Chance             | Whole-number percentage from 0–100%; leave blank to disable the rule. |
-| Cadence            | **Once each round** or **On a triggering occurrence**.                |
-| Occurrence trigger | Required for conditional cadence; leave blank for every-round checks. |
-| Eligibility        | Optional condition that must hold; it does not change the cadence.    |
-| Effect             | What happens when the chance check succeeds.                          |
-| Roll scope         | One shared check or one check per eligible player in the round.       |
+| Control            | What to enter                                                              |
+| ------------------ | -------------------------------------------------------------------------- |
+| Chance             | A whole-number percentage from 0 to 100. Leave blank to turn the rule off. |
+| Cadence            | When to check: once each round, or when a described event occurs.          |
+| Occurrence trigger | The event to check for. Required only for **On a triggering occurrence**.  |
+| Eligibility        | An optional condition that must also be true.                              |
+| Effect             | What happens when the check succeeds.                                      |
+| Roll scope         | One roll for everyone, or a separate roll for each eligible player.        |
 
-For example, set Chance to 20, choose conditional cadence, use "A player enters a building"
-as the trigger, "The building is unstable" as eligibility, and "The building collapses" as
-the effect. Shared scope makes one check if the trigger and eligibility match; per-player scope
-makes separate checks for matching players.
+For example: Chance **20**, Cadence **On a triggering occurrence**, trigger
+**A player enters a building**, eligibility **The building is unstable**, and
+effect **The building collapses**. Use one shared roll for one common result,
+or per-player rolls for separate results.
 
-For every-round cadence without eligibility, Python schedules the checks directly. The AI
-identifies conditional triggers and evaluates optional eligibility against current actions and
-world state. Remaining inside a building does not count as entering again, but can satisfy an
-every-round eligibility condition. Each matching player receives at most one check per round
-with per-player scope; shared scope receives at most one check per round.
-Keep conditions concrete and tied to the current actions or established situation; avoid
-chains where one random event must trigger another check in the same round.
+Entering again can trigger another check; staying inside does not count as
+entering. With **Once each round**, leave the trigger empty and use eligibility
+if the rule should apply only in certain situations. Checks begin with action
+rounds, after the opening. Each eligible player gets at most one check per round;
+a shared rule gets at most one shared check.
 
-Alternatively, expand **Legacy chance text** and enter one single-line rule with exactly one
-percentage and explicit timing, such as "Add a 40% chance every round that a bell rings."
-Use the controls or legacy text, not both. Missing or mixed timing is rejected in legacy input.
+0% never succeeds; 100% always succeeds when the rule applies. The AI decides
+whether conditions apply and writes the effects, so AI can make mistakes.
 
-Python makes the percentage rolls separately from action dice: 0% never triggers and 100%
-always triggers when the condition occurs. Each new check is independent; a 2% chance does
-not guarantee an event within 50 rounds. Checks begin with action rounds, not the opening scenario.
-Rules, rolls, and failed checks stay private; players see only observable story consequences.
-Server logs and private HTML transcripts record the checks.
+## Optional private guidance and saved scenarios
 
-The AI identifies whether a conditional trigger occurred and narrates the result, so those steps
-still depend on model accuracy. A conditional result is used only if its trigger actually happens;
-it cannot force a blocked action to succeed. A setting-conflicting attempt may still receive a
-public difficulty roll when its outcome is uncertain, with the low plausibility reflected in the
-result. Failed LLM rounds receive up to two automatic retries, retaining any dice already rolled.
-If recovery fails or the overall deadline expires, the host can retry the paused round or end.
-Leave Chance and legacy text blank when no percentage event is wanted.
+Use **Additional freeform DM guidance** to steer the story, introduce surprises or
+adjust pacing without announcing the plan to players. The AI receives this guidance
+and reveals its effects through play; it may occasionally reveal more than intended.
+Use the chance controls for percentage rules rather than putting them here.
 
-## Freeform private guidance
-
-Use **Additional freeform DM guidance** for non-probabilistic secret steering about the world,
-story direction, pacing, or other compatible presentation choices. The AI should apply compatible
-steering consistently without quoting the guidance. Do not put percentage-based rules in this
-field; the server rejects them so the game can never accept more than one percentage event.
+The host can save, load and delete scenarios in the browser. Saved scenarios
+include the scenario, private guidance and chance settings. They stay in that
+browser profile on that game address. Clearing browser site data removes them;
+changing the game address gives you a different set of saved scenarios.
 
 ## Rejoining a game
 
-A disconnected tab tries to reconnect automatically. If you close it, open the same game address
-in the same browser profile and enter the same player name and password. Your saved browser
-identity allows you to reclaim that character; the password and name alone are not enough.
+A disconnected tab tries to reconnect automatically. After closing a tab, open
+the **same game address in the same browser profile**, then enter the same name
+and password. The browser remembers a private identity for your character.
+Your name and password alone cannot reclaim an existing character.
 
-Clearing site data, changing browsers, or using a different address can prevent recovery.
-Rejoining restores the opening and current state, then replays available missed public events.
-Action drafts and pending submissions are retained through connection interruptions within the
-same game and cleared when joining a new game. The on-screen game log holds up to 500 entries
-and chat holds up to 300.
+Changing browsers, clearing site data or using another address can prevent
+rejoining. A recreated public tunnel has a new address, so the browser's saved
+identity and scenarios from the old address will not be available there.
+Action drafts survive interruptions in the same game and are cleared for a new game.
 
-## History and longer games
+## History, archives and new games
 
-The **History** panel offers paginated public events, search, and a JSONL export. This public
-history stays in server memory for the current game; no JSONL logs are automatically written.
-Use **Export public history** to download a JSONL file before starting another game or restarting
-the server. Public history excludes private DM guidance and hidden checks.
+**History** lets you browse and search public events. Use **Export public history**
+to download a JSONL file: a text file with one event per line. Export before a
+new game or server restart; public History is kept only in memory.
 
-The game writes HTML transcripts to `.logged_games/` on the server. They include the original
-scenario prompt, generated opening, player actions, results, and dice rolls. **Transcripts also
-include private DM guidance and hidden checks**, which remain out of the players' live game log.
-The private guidance section separates freeform guidance from the chance event. Structured
-events show readable chance, timing, scope, trigger, eligibility, and effect fields.
+The server saves HTML transcripts in `.logged_games/`, including hidden guidance,
+chance rules and rolls. **Sharing them with players after the session is encouraged:**
+they reveal how the surprises and story direction came together. If you want to
+reuse the same hidden instructions in a future game, check the transcript before
+sharing it to preserve those surprises.
+Docker keeps them in the project folder `data/logged_games/`;
+[DOCKER.md](DOCKER.md#upgrade-and-back-up) explains how to export and back them up.
 
-For longer games, the AI summarizes older rounds into memory and checks the summary for lost
-facts. If a summary fails those checks, the original history is kept. The context indicator
-shows how much conversation is retained; its details explain the counting method, context
-limit, and total AI usage. The total usage across calls is different from the space occupied
-by the current conversation.
+After **End game**, the host can select **Start new game** without restarting the
+server. The other players must join again after the new scenario is ready.
+The new game gets fresh AI memory and History; old transcripts remain.
+Restarting the server loses the active game. Transcripts cannot be loaded as saved games.
 
-One server runs one game at a time. After ending a game, the host can click **Start new game**
-to create a new scenario without restarting the server. Other players are disconnected and
-must join again once the scenario is ready. The new game starts with fresh AI context, logs,
-and History state; the previous game's archives remain on the server. A separate HTML transcript
-is created when the new game starts, even if its title matches the previous game.
-Restarting the server loses the live session, and a transcript cannot be loaded as a saved game.
+For longer adventures, the AI summarizes older rounds to make room for new ones.
+The game checks those summaries for missing facts, but perfect recall is not guaranteed.
+The token display distinguishes the conversation currently kept by the AI from
+the total AI usage across the game. Tokens are the small pieces of text models
+process and, for paid services, bill for.
 
-## Development
+## For developers and model testers
 
-See [quality checks](INSTALL.md#quality-checks), [the task list](TASKS.md), and
-[the maintenance guide](AGENTS.md). Offline tests clean up their temporary files and may be
-run during read-only reviews when temporary files are acceptable.
+See [quality checks](INSTALL.md#quality-checks), [the task list](TASKS.md),
+and [the maintenance guide](AGENTS.md).
 
 ## Credits
 
@@ -160,9 +142,8 @@ assisted in the development of this app.
 
 ## Model benchmarking
 
-The new benchmarks/benchmark_chance_events.py script can be used to benchmark your local model's
+The benchmarks/benchmark_chance_events.py script can be used to benchmark your local model's
 ability to follow instructions, and to test out different model settings.
-It creates a set of trigger-events and runs a benchmark on whether the AI properly responded to the caused trigger-event or not.
 This is not a direct test for whether the model is fit to be a DM for this game, but a lot of failures means the model is very unlikely to be suitable.
 Also, the json logged responses can give an indication of the model's general intelligence and creativity.
 
@@ -170,9 +151,7 @@ Development showed that the proper configurations (temp, top-p, top-k, presence-
 are a massive influence on how well the model passes the benchmark. **With good model settings,
 the benchmark pass rate for a model climbed from 62% to a consistent 100% over several runs.**
 
-Make sure to find out what are the proper settings for the model you plan to use.
-
-Read a more comprehensive description and a couple of model recommendations in [INSTALL.md](INSTALL.md)
+Read a more comprehensive description and a model recommendation in [INSTALL.md](INSTALL.md#benchmarking-local-model-instruction-following).
 
 ### Running benchmarks
 

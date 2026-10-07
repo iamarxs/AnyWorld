@@ -605,6 +605,71 @@ test("overwrite and deletion preserve other scenarios, current form, and unrelat
     assert.equal(tab.node("saved-scenarios").children[0].textContent, "No saved scenarios");
 });
 
+test("scenario files round-trip private fields and drafts independently of browser storage", async () => {
+    const blockedStorage = { getItem() { throw new Error("Storage blocked"); },
+        setItem() { throw new Error("Storage blocked"); } };
+    const tab = browser(blockedStorage);
+    const fields = {
+        "scenario-input": "  Hyvää iltaa!\nAn unfinished forest adventure.  ",
+        "guidance-input": "\nThe guide is secretly a ghost.\n",
+        "chance-percent": "0", "chance-cadence": "condition",
+        "chance-trigger": "  A player enters a building  ", "chance-eligibility": "",
+        "chance-effect": "The ceiling falls", "chance-scope": "per_player",
+    };
+    for (const percentage of ["0", "100", ""]) {
+        fields["chance-percent"] = percentage;
+        for (const [id, value] of Object.entries(fields)) tab.node(id).value = value;
+        tab.node("scenario-save-name").value = "Forest / adventure";
+        tab.node("export-scenario").listeners.click();
+        assert.equal(tab.downloads.at(-1).download, "Forest _ adventure.json");
+        const file = tab.blobs.at(-1);
+        assert.equal(file.type, "application/json");
+        const loaded = browser(blockedStorage);
+        loaded.node("scenario-file").files = [file];
+        loaded.node("scenario-file").value = "chosen.json";
+        await loaded.node("scenario-file").listeners.change();
+        for (const [id, value] of Object.entries(fields)) assert.equal(loaded.node(id).value, value);
+        assert.equal(loaded.node("scenario-save-name").value, "Forest / adventure");
+        assert.equal(loaded.node("scenario-file").value, "");
+        assert.match(loaded.node("scenario-storage-status").textContent, /file loaded/);
+        assert.equal(loaded.sockets[0].sent.length, 0);
+    }
+    tab.node("scenario-save-name").value = "";
+    tab.node("export-scenario").listeners.click();
+    assert.equal(tab.downloads.at(-1).download, "Scenario.json");
+    tab.node("import-scenario").listeners.click();
+    assert.equal(tab.downloads.length, 5); // The native file picker was clicked.
+    assert.equal(tab.sockets[0].sent.length, 0);
+});
+
+test("invalid or unreadable scenario files leave the form and browser saves unchanged", async () => {
+    const tab = browser();
+    tab.node("scenario-save-name").value = "Keep";
+    tab.node("scenario-input").value = "Keep this draft";
+    tab.node("guidance-input").value = "Keep private guidance";
+    tab.node("save-scenario").listeners.click();
+    const saved = tab.localStorage.getItem("artificialDungeonScenarios");
+    const entry = JSON.parse(saved)[0];
+    for (const text of ["{", "null", "[]", JSON.stringify({ name: "Broken", fields: {} }),
+        JSON.stringify({ ...entry, fields: { ...entry.fields, guidance: 42 } }),
+        JSON.stringify({ ...entry, fields: { ...entry.fields, chanceCadence: "unknown" } }),
+        JSON.stringify({ ...entry, fields: { ...entry.fields, chanceScope: "unknown" } })]) {
+        tab.node("scenario-file").files = [new Blob([text])];
+        await tab.node("scenario-file").listeners.change();
+        assert.equal(tab.node("scenario-input").value, "Keep this draft");
+        assert.equal(tab.node("guidance-input").value, "Keep private guidance");
+        assert.equal(tab.node("scenario-save-name").value, "Keep");
+        assert.equal(tab.localStorage.getItem("artificialDungeonScenarios"), saved);
+        assert.match(tab.node("scenario-storage-status").textContent, /Could not load/);
+    }
+    tab.node("scenario-file").files = [{ text: async () => { throw new Error("Read failed"); } }];
+    await tab.node("scenario-file").listeners.change();
+    assert.match(tab.node("scenario-storage-status").textContent, /Could not load/);
+    tab.node("scenario-file").files = [];
+    await tab.node("scenario-file").listeners.change();
+    assert.equal(tab.node("scenario-input").value, "Keep this draft");
+});
+
 test("scenario storage errors do not erase saves or alter the form", () => {
     for (const invalid of ["{", "null", "{}", '[{"name":"Broken","fields":{}}]']) {
         const local = storage();

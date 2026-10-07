@@ -20,4 +20,9 @@ pytest-output.txt
 benchmarks/*
 !benchmarks/benchmark_chance_events.py
 .env
+docker.env
+docker/game.env
+docker/game.yaml
+docker/compose.local.yaml
 
+data/

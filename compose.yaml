@@ -1,0 +1,83 @@
+name: anyworld
+
+services:
+  game:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      AD_CONFIG_PATH: /config/game.yaml
+      AD_SERVER__HOST_PASSWORD: ${AD_SERVER__HOST_PASSWORD:?Set a distinct host password}
+      AD_SERVER__PLAYER_PASSWORD: ${AD_SERVER__PLAYER_PASSWORD:?Set a distinct player password}
+      AD_SERVER__TLS_ADDRESSES: '${TLS_ADDRESSES:-["game","localhost","127.0.0.1"]}'
+      AD_SERVER__TRUSTED_PROXIES: '["${TUNNEL_IP:-172.30.41.2}/32"]'
+      AD_LLM__DEBUG_RAW_RESPONSES: "false"
+      ANYWORLD_TUNNEL_METRICS: http://tunnel:20241
+    command: [--host, 0.0.0.0, --port, "4141"]
+    ports:
+      - "${GAME_BIND_ADDRESS:-0.0.0.0}:${GAME_PORT:-4141}:4141"
+    volumes:
+      - type: bind
+        source: ${GAME_CONFIG:-./docker/game.example.yaml}
+        target: /config/game.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - ./data/logged_games:/app/.logged_games
+      - certificates:/app/certs
+    networks:
+      backend:
+      ingress:
+        ipv4_address: ${GAME_INGRESS_IP:-172.30.41.3}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import ssl, urllib.request;
+          context = ssl.create_default_context(cafile='certs/cert.pem');
+          urllib.request.urlopen('https://localhost:4141/', context=context, timeout=5).close()
+      interval: 10s
+      timeout: 6s
+      start_period: 30s
+      retries: 6
+    stop_grace_period: 180s
+
+  tunnel:
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
+    pull_policy: missing
+    profiles: [tunnel]
+    restart: unless-stopped
+    user: "65532:65532"
+    depends_on:
+      game:
+        condition: service_healthy
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 0.0.0.0:20241
+      - --url
+      - https://game:4141
+      - --origin-server-name
+      - game
+      - --origin-ca-pool
+      - /certs/cert.pem
+    volumes:
+      - certificates:/certs:ro
+    networks:
+      ingress:
+        ipv4_address: ${TUNNEL_IP:-172.30.41.2}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  certificates:
+
+networks:
+  backend:
+  ingress:
+    ipam:
+      config:
+        - subnet: ${TUNNEL_SUBNET:-172.30.41.0/24}

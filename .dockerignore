@@ -1,0 +1,21 @@
+# Only application inputs belong in the build context.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!README.md
+!app.py
+!config.example.yaml
+!api/
+!api/**/*.py
+!core/
+!core/**/*.py
+!core/defaults.yaml
+!logic/
+!logic/**/*.py
+!static/
+!static/**
+!templates/
+!templates/**
+**/__pycache__/
+**/*.py[cod]

@@ -122,8 +122,8 @@
             the AI follows this guidance to shape the story.
           </div>
           <div id="scenario-library">
-            <p>You may save the scenario to your browser's localStorage so the same scenario can be easily
-              loaded for other game rounds as well. All data stays local in your browser.</p>
+            <p>Save scenarios in this browser or as JSON files for reuse on another browser or device.
+              Saves include private DM guidance and chance rules.</p>
             <label for="saved-scenarios">Saved scenarios</label>
             <select id="saved-scenarios">
               <option value="">Choose a saved scenario</option>
@@ -135,6 +135,11 @@
             <label for="scenario-save-name">Save name</label>
             <input id="scenario-save-name" maxlength="100" autocomplete="off">
             <button id="save-scenario" type="button">Save scenario</button>
+            <div class="scenario-library-actions">
+              <button id="export-scenario" type="button">Save to file</button>
+              <button id="import-scenario" type="button">Load from file</button>
+            </div>
+            <input id="scenario-file" type="file" accept=".json,application/json" hidden>
             <p id="scenario-storage-status" role="status"></p>
           </div>
           <button type="submit">Generate scenario</button>
@@ -180,7 +185,7 @@
   <script src="/static/js/transport.js?v=recovery-4"></script>
   <script src="/static/js/accessibility.js?v=recovery-2"></script>
   <script src="/static/js/journal.js?v=recovery-3"></script>
-  <script src="/static/js/scenarios.js?v=3"></script>
+  <script src="/static/js/scenarios.js?v=4"></script>
   <script src="/static/js/app.js?v=recovery-9"></script>
 </body>
 

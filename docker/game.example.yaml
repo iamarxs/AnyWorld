@@ -1,34 +1,18 @@
-# Copy to config.yaml or select a local file with AD_CONFIG_PATH.
-# Set distinct host_password and player_password values below before launch.
-# Alternatively, set AD_SERVER__HOST_PASSWORD and AD_SERVER__PLAYER_PASSWORD;
-# environment variables override the values below.
+# Copy this file to docker/game.yaml for custom game settings and set GAME_CONFIG.
+# All existing game YAML options are supported; see config.example.yaml.
 server:
-  host: "0.0.0.0"
-  port: 4141
-  host_password: null
-  player_password: null
   max_players: 6
 llm:
-  provider: "compatible" # use "openai" for the direct OpenAI API
-  endpoint: "http://localhost:8033/v1"
-  api_key: "sk-no-key-required"
-  # Local fallback when discovery fails. llama.cpp /props takes precedence.
+  # Local fallback only; llama.cpp /props discovery overrides it with the live per-slot size.
   context_window_size: 16384
-  # OpenAI fallback: check the selected model's documented context limit and pricing.
-  # If omitted/null, existing configs continue using context_window_size for OpenAI too.
+  # OpenAI has no /props discovery. Check the selected model's documented context limit.
   openai_context_window_size: 245760
-  # https://developers.openai.com/api/docs/pricing
-  model_name: "local"
-
-  # llama.cpp uses its own /apply-template and /tokenize endpoints.
-  tokenizer_encoding: null # legacy OpenAI fallback when the setting below is omitted/null
-  openai_tokenizer_encoding: auto # use tiktoken's known model mapping; unknown models use byte estimates
-
-  # Shared by llama.cpp and OpenAI: none disables thinking; low/medium/high enable it.
-  # llama.cpp effort levels depend on the loaded model and its chat template.
-  # Note: The configuration is included as an experiment. Reasoning "none" has so far given the best
-  # gameplay experience both with local Gemma 4 and OpenAI's gpt-5.6-luna.
-  reasoning_effort: "none" # none/low/medium/high
+  # Local llama.cpp uses its own tokenizer endpoints; this legacy fallback is unused.
+  tokenizer_encoding: null
+  # OpenAI only: resolve known models through tiktoken; unknown models use byte estimates.
+  openai_tokenizer_encoding: auto
+  # Recommended for gameplay. The canonical template still permits thinking.
+  reasoning_effort: none
   system_prompt: |
     You are the Dungeon Master, world simulator, and rules arbiter for a multiplayer text RPG.
     Keep internal reasoning concise and focused.

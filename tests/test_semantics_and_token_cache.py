@@ -475,3 +475,53 @@ def test_opening_without_all_player_names_is_rejected_before_remembering():
         assert "Bob" in client.calls[-1]["messages"][-1]["content"]
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "model,configured,legacy,expected",
+    [
+        ("gpt-5.6-luna", "auto", None, "o200k_base"),
+        ("gpt-5.6-terra", "auto", "cl100k_base", "o200k_base"),
+        ("gpt-5.6-sol", "auto", None, "o200k_base"),
+        ("gpt-4", "auto", None, "cl100k_base"),
+        ("gpt-5.6-luna", "o200k_base", None, "o200k_base"),
+        ("gpt-5.6-luna", "cl100k_base", "o200k_base", None),
+        ("gpt-5.6-luna", None, "o200k_base", "o200k_base"),
+        ("gpt-5.6-luna", None, None, None),
+        ("unmapped-test-model", "auto", None, None),
+        ("unmapped-test-model", "o200k_base", None, None),
+    ],
+)
+def test_openai_encoding_selection_preserves_unknown_model_fallback(
+    monkeypatch, model, configured, legacy, expected
+):
+    """Provider-specific settings select known encodings without guessing or network I/O."""
+    from logic.llm import tokenization
+
+    settings.llm.provider = "openai"
+    settings.llm.model_name = model
+    settings.llm.tokenizer_encoding = legacy
+    settings.llm.openai_tokenizer_encoding = configured
+    loaded = []
+
+    class Encoding:
+        def encode(self, text, **kwargs):
+            return [1]
+
+    encoding = Encoding()
+
+    def get_encoding(name):
+        loaded.append(name)
+        return encoding
+
+    monkeypatch.setattr(tokenization.tiktoken, "get_encoding", get_encoding)
+
+    async def run():
+        budget = tokenization.TokenBudget()
+        count = await budget.input_tokens([{"role": "user", "content": "A long sentence."}], None)
+        assert loaded == ([expected] if expected else [])
+        assert (budget.encoding is encoding) is bool(expected)
+        assert count == (65 if expected else 80)
+        await budget.close()
+
+    asyncio.run(run())
