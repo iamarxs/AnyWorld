@@ -1,6 +1,7 @@
 """Console-only module colors, with plain output for unsupported streams."""
 
 import logging
+from copy import copy
 import os
 import re
 import sys
@@ -23,7 +24,7 @@ _MODULES = (
     "logic.debug_log",
     "logic.transcript",
     "uvicorn",
-    "uvicorn.error",
+    "uvicorn.server",
     "uvicorn.access",
     "httpx",
 )
@@ -104,6 +105,9 @@ class ModuleFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Render one record, assigning new logger names a spare color lazily."""
+        if record.name == "uvicorn.error":
+            record = copy(record)
+            record.name = "uvicorn.server"
         rendered = super().format(record)
         if not self.color_depth:
             return rendered

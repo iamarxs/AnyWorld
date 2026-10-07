@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
@@ -15,6 +16,7 @@ from core.config import settings
 from core.schemas import ClientPayload, ServerEvent, validate_client_data
 from api.admission import WindowBudget, receive_payload, origin_allowed, source_address
 from api.windows_asyncio import install_windows_socket_cleanup
+from api.tunnel import announce_quick_tunnel
 from logic.engine import GameEngine
 from logic.llm_manager import LLMContextManager
 from logic.models import GameState, Player
@@ -197,9 +199,16 @@ def create_app(resolver_factory=LLMContextManager) -> FastAPI:
         application.state.history_messages = WindowBudget(30, 10)
         application.state.manager = manager
         application.state.engine = engine
+        metrics_url = os.environ.get("ANYWORLD_TUNNEL_METRICS", "").rstrip("/")
+        tunnel_task = (
+            asyncio.create_task(announce_quick_tunnel(metrics_url)) if metrics_url else None
+        )
         try:
             yield
         finally:
+            if tunnel_task is not None:
+                tunnel_task.cancel()
+                await asyncio.gather(tunnel_task, return_exceptions=True)
             try:
                 await application.state.engine.shutdown()
             finally:
