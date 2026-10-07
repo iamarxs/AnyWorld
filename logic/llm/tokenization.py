@@ -44,7 +44,12 @@ class TokenBudget:
         estimate until a provider-specific tokenizer is known.
         """
         self._http: httpx.AsyncClient | None = None
-        self.context_window_size = settings.llm.context_window_size
+        self.context_window_size = (
+            settings.llm.openai_context_window_size
+            if settings.llm.provider == "openai"
+            and settings.llm.openai_context_window_size is not None
+            else settings.llm.context_window_size
+        )
         self.context_window_source = "configured fallback"
         self._context_discovered = settings.llm.provider != "compatible"
         self.encoding = None
@@ -157,6 +162,7 @@ class TokenBudget:
             settings.llm.endpoint,
             settings.llm.model_name,
             settings.llm.tokenizer_encoding,
+            settings.llm.openai_tokenizer_encoding,
             self._template_identity,
             template_identity,
             message_identity,
@@ -208,7 +214,10 @@ class TokenBudget:
             self._encoding_loaded = True
             try:
                 known_encoding = tiktoken.encoding_name_for_model(settings.llm.model_name)
-                if settings.llm.tokenizer_encoding == known_encoding:
+                configured = settings.llm.openai_tokenizer_encoding
+                if configured is None:
+                    configured = settings.llm.tokenizer_encoding
+                if configured in ("auto", known_encoding):
                     self.encoding = await asyncio.to_thread(tiktoken.get_encoding, known_encoding)
                     self.token_count_method = "model tokenizer + estimated framing/schema allowance"
             except (KeyError, ValueError, OSError):

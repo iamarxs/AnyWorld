@@ -12,20 +12,17 @@ llm:
   provider: "compatible" # use "openai" for the direct OpenAI API
   endpoint: "http://localhost:8033/v1"
   api_key: "sk-no-key-required"
-  # Fallback value; successful llama.cpp auto-detection takes precedence.
-  # llama.cpp should allow for auto-detection, but since OpenAI does not, find out the context
-  # window of the model you are using, and set this to a slightly lower value to be safe.
-
-  context_window_size: 245760
-  # You can find OpenAI's current models and pricing at https://developers.openai.com/api/docs/pricing
-  # Note that their pricing jumps by approximately 100% after the context reaches 272k (278528),
-  # even though most support a size of 1M tokens.
-  # To avoid the price hike, keep the context_window_size setting a bit below this value so the
-  # game compacts the context window before it reaches >272k.
-  # gpt-5.6-luna and gpt-6-luna are cheap and more than cabable DM AIs.
+  # Local fallback when discovery fails. llama.cpp /props takes precedence.
+  context_window_size: 16384
+  # OpenAI fallback: check the selected model's documented context limit and pricing.
+  # If omitted/null, existing configs continue using context_window_size for OpenAI too.
+  openai_context_window_size: 245760
+  # https://developers.openai.com/api/docs/pricing
   model_name: "local"
 
-  tokenizer_encoding: "cl100k_base" # set to null if token estimates look wrong or the app errors on this
+  # llama.cpp uses its own /apply-template and /tokenize endpoints.
+  tokenizer_encoding: null # legacy OpenAI fallback when the setting below is omitted/null
+  openai_tokenizer_encoding: auto # use tiktoken's known model mapping; unknown models use byte estimates
 
   # Shared by llama.cpp and OpenAI: none disables thinking; low/medium/high enable it.
   # llama.cpp effort levels depend on the loaded model and its chat template.
