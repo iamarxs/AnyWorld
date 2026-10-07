@@ -1,7 +1,10 @@
 # Anyworld (ArtificialDungeon): current maintenance guide
 
-This section describes current implementation; differences from the original requirements are not
-automatically approved product changes. Proposed fixes belong in TASKS.md.
+This guide is for developers and coding assistants. For playing, use [README.md](README.md).
+For setup, use [INSTALL.md](INSTALL.md) or [DOCKER.md](DOCKER.md).
+
+It describes the current code. A difference from older requirements does not give permission
+to change the product. Record proposed fixes in TASKS.md.
 
 ## Working conventions
 
@@ -11,7 +14,9 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
   or run live inference/benchmarks. Edit documentation only when explicitly requested.
 - Keep party chat outside LLM context. Private DM guidance and hidden dice stay out of public
   events; server-side HTML transcripts include them, and private-check rolls appear in server logs.
-  Treat these files as private archives, not player-safe exports.
+  This separation preserves surprises during play. Encourage sharing HTML transcripts
+  after a session; advise checking them only if the host wants to preserve hidden
+  instructions for reuse. Credential and private-key handling remain separate.
 - Preserve join-order input collection and simultaneous, causally coherent round resolution.
 - Keep network/file I/O outside state-mutation locks; use logic/models.py protocols rather than
   importing concrete transport into game logic. An ended game must not be revived by stale inference.
@@ -20,11 +25,14 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
 
 - Python 3.11+, FastAPI, Pydantic, vanilla JS/CSS. Package and CLI name: `anyworld`.
 - `app.py` validates passwords and starts Uvicorn with HTTPS. `api/tls_bootstrap.py` handles
-  IP discovery and self-signed certificates under `certs/`.
+  IP discovery and self-signed certificates under `certs/`. Explicit `tls_addresses` skip
+  discovery. Generated certificates also cover localhost, IPv4 loopback and IPv6 loopback.
 - `core/config.py` exports lowercase singleton `settings`. The llm schema additionally contains
-  provider (`compatible`/`openai`), tokenizer_encoding, system_prompt and shared
+  provider (`compatible`/`openai`), tokenizer_encoding, openai_tokenizer_encoding, system_prompt and shared
   `reasoning_effort`. Compatible `/props`
-  discovery overrides context_window_size when successful. Server passwords must be distinct.
+  discovery overrides context_window_size when successful. OpenAI uses the optional
+  openai_context_window_size instead, falling back to context_window_size if omitted/null.
+  Examples use 245760 to leave room below long-context pricing. Server passwords must be distinct.
   Settings merge `AD_` environment overrides over YAML, using `__` for nested fields;
   `AD_SERVER__HOST_PASSWORD` and `AD_SERVER__PLAYER_PASSWORD` override YAML credentials.
   Project `.env` values load without overwriting process variables. Direct OpenAI uses only
@@ -55,12 +63,12 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
   while preserving the planned action roll, avoiding a retry loop over privacy classification.
 - Host authentication precedes scenario setup. `generate_scenario_title()` returns only a title
   through ScenarioTitle; it does not remember narrative. Joining players see the host-typed prompt.
-  Scenario setup accepts one optional `StructuredChanceRule` in `chance_rule` or legacy text in
-  `chance_event`, plus separate freeform `guidance`. The structured rule has percentage (0–100),
-  cadence, trigger, eligibility, effect and scope. Conditional cadence requires a trigger;
-  per-round cadence forbids one. Legacy text must specify unambiguous timing. Both forms cannot
-  be used together; percentage rules in freeform guidance are rejected, preserving one event
-  per game. The rule is serialized into the resolver's private context after validation.
+  Scenario setup accepts one optional `StructuredChanceRule` in `chance_rule`, plus separate
+  freeform `guidance`. The rule has percentage (0–100), cadence, trigger, eligibility, effect
+  and scope. Conditional cadence requires a trigger; per-round cadence forbids one.
+  The old `chance_event` field and legacy text form are removed. Percentage rules in freeform
+  guidance are rejected, preserving one event per game. The validated rule is serialized
+  into the resolver's private context.
   Start Game calls `generate_start_state()` with joined names and broadcasts the generated opening.
   Missing player names are rejected; role, goal, and prose coherence remain prompt instructions.
   Setting-conflicting attempts may receive a public difficulty roll when their outcome is
@@ -77,7 +85,8 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
   dm_thinking, game_ended, token_usage, journal_page, action_accepted.
   Turn directives use active_player_id.
 - `core/schemas.py`: RoundResolution player_resolutions keys must be exact player names; runtime
-  validation rejects other keys. ScenarioTitle contains only title. DicePlan has rolls and hidden_rolls.
+  validation rejects other keys. Opening generation uses an empty player_resolutions object.
+  ScenarioTitle contains only title. DicePlan has rolls and hidden_rolls.
   ContextSummary has world_state, player_states, important_npcs and unresolved_threads. Models forbid extra fields and coercion.
 - `logic/dice.py` action dice use integers 0..100 inclusive. Percentage-event dice use 1..100
   inclusive and succeed at roll <= chance_percent, giving exact 0% and 100% boundaries.
@@ -88,8 +97,8 @@ automatically approved product changes. Proposed fixes belong in TASKS.md.
   not TXT. Appends are thread-offloaded; directory creation at construction is synchronous.
   Original scenario prompt and Opening scenario are separate sections; private guidance and hidden
   checks are included. Private DM guidance has separate Freeform guidance and Chance event
-  subtitles; structured rules render labeled, human-readable settings, while legacy rules retain
-  their original text. The resolver still receives the original combined private context.
+  subtitles; structured rules render labeled, human-readable settings. There is no legacy
+  text fallback. The resolver still receives the original combined private context.
   Token usage is broadcast to all after rounds.
   Writes/finalization are serialized; cancellation waits for outstanding file writes.
 - `logic/journal.py` keeps allowlisted public events only in memory for the current game,
@@ -115,13 +124,15 @@ original memory. Tokenizer HTTP calls are not inference.
 
 Every generation has a configured output cap, schema/framing allowance and safety margin. llama.cpp
 uses /apply-template and /tokenize when available; OpenAI uses a matching known tiktoken encoding.
+`openai_tokenizer_encoding: auto` resolves known model mappings; omitted/null preserves the
+legacy `tokenizer_encoding` behavior. Unknown models and mismatches retain byte estimates.
 Unavailable/unknown tokenization uses a conservative UTF-8-byte estimate. Estimates are labelled;
 backend-specific template variations still require an appropriate configured safety margin.
 Aggregate actions are preflighted before acceptance using the live dice and baseline resolution
 prompt builders; the final resolution prompt is measured again after dice and chance-event context
 are available. Summary requests are also bounded. Direct private-guidance echoes and explicit
-hidden-dice disclosures are rejected before remembering output;
-this guard cannot prove arbitrary paraphrases secret-free. No application cache routing exists.
+hidden-dice disclosures are rejected before remembering output during play;
+this guard cannot guarantee the model will preserve every intended surprise. No application cache routing exists.
 
 Optional llm settings: initial_output_tokens (4096), round_output_tokens (4096), dice_output_tokens
 (768), summary_output_tokens (3072), token_safety_margin (256), request_timeout_seconds (120.0),
@@ -153,10 +164,13 @@ is not round/game consumption. `/props` per-slot n_ctx overrides the configured 
 shows the source. Failed backend tokenization remains retryable; never clamp estimates to hide an
 overflow or claim byte estimates are exact tokens.
 
+Readable raw diagnostics use .log files; requests belonging to a round may first use .tmp files
+and are combined when round diagnostics are finalized.
+
 INFO logs cover compaction passes/audits/rollback, inference jobs/retries, accepted actions, auth,
 transcript writes and game lifecycle. Private-guidance checks log player names, dice values and
 retry reuse on the server. Optional raw responses go to `.debug/llm/` before parsing; these files
-can include secrets and are not automatically rotated. See INSTALL.md for launch flags.
+include hidden gameplay guidance and are not automatically rotated. See INSTALL.md for launch flags.
 
 ## UI
 
@@ -168,6 +182,7 @@ and JSONL export. Host-typed scenario prompt precedes the generated Opening scen
 After ENDED, only the host sees Start new game. Session changes clear chat/log entries,
 History filters/cursors, export buffers, and player colors. Saved action drafts carry a session ID;
 same-game reloads preserve them, while different or unscoped drafts are cleared on authentication.
+The chance section is labeled "Chance-based event rule (optional)"; there is no legacy text input.
 The host card is min(48rem, 100%) wide, with chance-control labels above their own inputs in
 two columns, stacking into one column at <=700px. Inputs can shrink. Chance rules are validated
 on scenario submission; the host form has no JSON preview. Freeform DM guidance remains separate.
@@ -185,8 +200,25 @@ cleanup. Fixtures isolate settings and use fake clients; live backend benchmarks
 The initial 2026-09-14 review did not execute tests. The subsequent P1 implementation adds regression
 coverage for budgets, memory, privacy, authentication, cancellation and reconnects; see TASKS.md.
 
+## Docker deployment
+
+`compose.yaml` provides the HTTPS game and optional account-free Quick Tunnel.
+`compose.llama.yaml` adds NVIDIA CUDA llama.cpp, native HF downloads and readiness ordering;
+CPU inference is not supported. `compose.openai.yaml` selects the remote API and defines no
+local backend or model cache. `compose.debug.yaml` enables raw diagnostics in the host `data/debug/` folder.
+`docker.env` selects the files/profile and deployment settings. Game YAML is mounted read-only;
+model-server flags live in the local backend's Compose argument list. The canonical Jinja file
+is in `docker/templates/`; it permits thinking. Generated certs and model cache persist in named
+volumes; transcripts and diagnostics use host `data/logged_games/` and `data/debug/` bind mounts; active game state/public History stay in memory. The tunnel
+verifies origin HTTPS and can read the public certificate but not the private key. Only its fixed
+source address is trusted for forwarded client identity. The game uses an owned, cancellable background task to query cloudflared's private
+metrics endpoints and announce the URL after `/ready` succeeds. It waits at most
+120 seconds without blocking startup; direct-only deployments remain quiet. See DOCKER.md for operations; docker/smoke.py uses a fake backend, whereas
+live_check.py explicitly starts real NVIDIA inference and a temporary public tunnel.
+
 ## Documentation
 
 README.md is the player-facing overview. INSTALL.md contains installation, configuration,
-network/certificate details, checks and diagnostics. TASKS.md distinguishes open work from
+network/certificate details, checks and diagnostics. DOCKER.md contains Docker setup and operation.
+TASKS.md distinguishes open work from
 historical fixes and local benchmark observations; do not add links to unpublished benchmark files.

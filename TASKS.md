@@ -1,5 +1,15 @@
 # Tasks
 
+This is the developer work list, not a setup guide. Players should use [README.md](README.md);
+hosts should use [INSTALL.md](INSTALL.md) or [DOCKER.md](DOCKER.md).
+
+Historical entries may describe issues superseded by later work; verify the current code.
+References to private guidance, hidden rolls and player-safe exports describe
+in-session visibility. Hidden guidance and chance rules add surprises to play;
+sharing full HTML transcripts afterward is encouraged. Check them before sharing
+only if the host wants to preserve the same surprises for future sessions.
+Credentials and private keys still require protection.
+
 Static review: 2026-09-14, including pre-existing working-tree edits. Implementation was read
 only; venv and .venv were excluded. No tests, app startup or live inference were performed.
 P1 = correctness/security or substantial waste; P2 = optimization/reliability; P3 = optional.
@@ -12,18 +22,6 @@ after failures; forced termination can prevent cleanup. Use `python -B -m pytest
 with `PYTHONDONTWRITEBYTECODE=1` to avoid bytecode/cache artifacts, including in child processes.
 In-process ASGI tests are allowed; live server startup and backend benchmarks remain outside this
 workflow. The no-tests statement above records the historical review, not a current restriction.
-
-Historical benchmark observations below came from local runs. Their raw reports and local runner files
-are not part of the published repository; these observations are not reproducible evidence
-provided by this checkout and do not establish general performance guarantees.
-
-Review update: 2026-09-28. Production code reviewed statically; tests, virtual environments and
-cache folders excluded; no execution or implementation edits. Only TASKS.md, SUGGESTIONS.md,
-ASTRA-REVIEW.md and QWEN-REVIEW.md changed. New items are recommendations, not implementation
-authorization. Active work below is ordered P1, P2, then P3; Rxx references point to
-ASTRA-REVIEW.md, Qxx references point to QWEN-REVIEW.md, and Sxx references point to
-SUGGESTIONS.md.
-Existing history/benchmark observations are retained and were not independently revalidated.
 
 ## Active
 
@@ -62,8 +60,8 @@ Existing history/benchmark observations are retained and were not independently 
   - Line-oriented interpolation mixes user text with trusted SYSTEM annotations. Use separate structured actor/action/presence fields and control-safe identifiers/log rendering; keep chat outside context.
   - Acceptance: Forged actor lines/annotations remain untrusted data; valid multiline actions and exact names remain supported.
 
-- [ ] **P2 - Evaluate and strengthen public-output privacy checks (R07)** - logic/llm/validation.py; logic/llm_manager.py.
-  - Exact guidance fragments and English number patterns miss short/paraphrased/multilingual secrets and can collide with valid public rolls. Minimize secret exposure and add a measured adversarial leakage corpus.
+- [ ] **P2 - Preserve intended surprises in public output during play (R07)** - logic/llm/validation.py; logic/llm_manager.py.
+  - Exact guidance fragments and English number patterns miss short/paraphrased/multilingual secrets and can collide with valid public rolls. Preserve unannounced surprises during play and add a measured output-disclosure corpus.
   - Acceptance: Cover short secrets, paraphrases and equal public/private values; record false positives/negatives and never claim model/regex checks guarantee secrecy.
 
 - [ ] **P2 - Retain action drafts until server acceptance (R08)** - static/js/app.js:action submit handler; logic/engine.py:\_submit_action.
@@ -79,7 +77,7 @@ Existing history/benchmark observations are retained and were not independently 
 - [ ] **P2 - Recover missed rounds and preserve access to full history (R10)** - static/js/app.js:applySnapshot, trimContainer; logic/lobby.py:\_snapshot_locked.
   - Existing DOM prevents snapshot state replacement after disconnect. Reload only receives current state; the 500-entry cap deletes early history without a retrieval path.
   - Add public event sequence/cursor replay and paginated/virtualized history. Acceptance: reconnect restores missed events once and users can reach the opening without unbounded DOM growth or private-memory exposure.
-  - First step: track the last rendered completed round and include its full public result (outcomes and public dice) in snapshots. Never use private HTML transcripts as public replay data.
+  - First step: track the last rendered completed round and include its full public result (outcomes and public dice) in snapshots. Use public events for in-session replay; HTML transcripts include the underlying guidance and rolls.
   - Product follow-up (S02): expose a searchable, paginated public journal and a deterministic player-safe export or "catch up since I left" view from the public event store. Add an optional narrative recap only after its cost and privacy are measured.
   - Review 2026-09-28: include session identity and monotonic event ordering; a latest narrative alone cannot recover missing player outcomes/public dice.
 
@@ -139,7 +137,7 @@ Existing history/benchmark observations are retained and were not independently 
 - [ ] **P2 - Bound transcript filenames and make creation/retry resilient (R20)** - logic/transcript.py:start, \_write.
   - Promoted from Someday: title-derived filenames are unbounded and exists-then-append is not exclusive creation. Reserve bounded filenames in offloaded I/O, define partial-write handling and avoid phantom opening memory (R04).
   - Bound `ScenarioTitle.title` (for example, 80 characters) and defensively truncate the sanitized filename. Keep post-finalize appends from masking a committed round: handle the expected `RuntimeError` explicitly, log the race, and preserve the state/broadcast outcome.
-  - Acceptance: Long titles, concurrent reservations and injected disk errors preserve accepted state; private archives stay escaped and unserved. Existing serialized writes/stable colors and removal of unused previous_state are retained.
+  - Acceptance: Long titles, concurrent reservations and injected disk errors preserve accepted state; HTML transcripts stay escaped and are not automatically served by the game. Existing serialized writes/stable colors and removal of unused previous_state are retained.
 
 - [ ] **P2 - Validate TLS artifacts and robust offline startup (R20)** - api/tls_bootstrap.py.
   - Handle corrupt/mismatched cert/key pairs and interrupted renewal; provide explicit address/certificate configuration and true offline fallback. Review leaf ca=False and least-privilege key permissions without silently altering trust stores.
@@ -179,7 +177,7 @@ Existing history/benchmark observations are retained and were not independently 
   - Acceptance: injected interruption leaves either the previous checkpoint or one complete newer checkpoint, credentials/private data remain protected, and migrations reject incompatible state without reviving an ended game.
 
 - [ ] **P3 - Host memory inspector and correction history (S03)** - future fact-ledger UI; core/schemas.py; logic/llm_manager.py.
-  - Show the host durable world/player facts, source rounds and unresolved threads, with explicit corrections recorded as versioned, auditable changes. Keep private and public facts distinct and do not expose hidden guidance.
+  - Show the host durable world/player facts, source rounds and unresolved threads, with explicit corrections recorded as versioned, auditable changes. Keep private and public facts distinct during play, preserving unannounced guidance until its effects unfold.
   - Depends on R15's validated fact ledger; arbitrary prose edits must not bypass adjudication or resurrect consumed items and later consequences.
 
 - [ ] **P3 - Ready, pause and deliberate idle controls (S06)** - logic/lobby.py; logic/engine.py; static/js/app.js.
@@ -191,7 +189,7 @@ Existing history/benchmark observations are retained and were not independently 
   - Validate narrow-screen and keyboard-only use without changing the documented desktop/mobile layout as an incidental implementation detail.
 
 - [ ] **P3 - Scenario presets with public/private separation (S09)** - logic/lobby.py; core/config.py; static/js/app.js.
-  - Save reusable host settings, public premise and private guidance as distinct versioned fields. Preview the public portion before sharing; presets must not contain passwords, reconnect tokens or prior players' private state.
+  - Save reusable host settings, public premise and private guidance as distinct versioned fields. Preview the public portion when sharing an unrevealed scenario; presets must not contain passwords, reconnect tokens or prior players' private state.
   - Include an explicit scenario language choice rather than relying on backend-dependent language inference.
 
 - [ ] **P3 - Compare optional CPU advisors in shadow mode (VON / Needle)** - logic/models.py; future isolated evaluation only.
@@ -210,7 +208,30 @@ Existing history/benchmark observations are retained and were not independently 
 
 ## Done
 
-- [x] ~~2026-10-04 — Structured chance-rule form only~~ Removed the legacy chance-text input, payload field, validation and transcript fallback. Renamed the section to “Chance-based event rule” and added simple instructions; updated saved-scenario fields and asset cache versions.
+- [x] **Print a connected Quick Tunnel banner through normal Compose startup** (2026-10-07)
+  - Replaced host launch scripts with an owned background task in the game's lifespan.
+    It reads cloudflared's private readiness/hostname API and announces only a connected,
+    validated Quick Tunnel address. Shutdown cancels pending discovery; missing tunnels
+    do not block startup. The metrics port is not published.
+  - Display Uvicorn's internal `uvicorn.error` logger as `uvicorn.server`, preserving
+    severity, colors and the original record for other log handlers.
+  - Validation: 423 offline tests, four disposable container variants, and a live
+    Quick Tunnel URL announcement passed; Black, Flake8 and `git diff --check` passed.
+
+- [x] ~~Separate OpenAI tokenizer selection from local inference~~ (2026-10-07)
+  - Added `openai_tokenizer_encoding`; examples use `auto` for known tiktoken mappings.
+    Local llama.cpp retains native template/tokenizer counting. Omitted/null preserves
+    the legacy setting; unknown models and mismatches retain conservative estimates.
+
+- [x] ~~2026-10-07 — Review and clarify project documentation~~ Added clear player/host
+      setup paths, configuration-copy steps, Docker start/stop and backup instructions, and
+      troubleshooting. Corrected removed chance-text instructions, new-game behavior, certificate
+      coverage, output defaults and debug-file formats. Maintenance notes distinguish current
+      contracts from historical reviews. Checked local links, heading anchors and YAML examples.
+
+- [x] ~~2026-10-04 — Structured chance-rule form only~~ Removed the legacy chance-text input,
+      payload field, validation and transcript fallback. Renamed the section to
+      “Chance-based event rule” and added simple instructions; updated saved-scenario fields and asset cache versions.
 
 - [x] ~~Add browser-local scenario save, load and delete controls~~ (2026-10-04)
   - Named localStorage saves preserve the written scenario, including all guidance and other information.
@@ -228,7 +249,7 @@ Existing history/benchmark observations are retained and were not independently 
   - Added Freeform guidance and Chance event subtitles. Structured events show labeled chance,
     timing, scope, optional trigger, eligibility and effect with readable config values.
   - Legacy chance rules keep their original text under their own subtitle. Guidance and chance
-    text remain escaped and private; the combined resolver context is unchanged.
+    text remain escaped and host-side during play; the combined resolver context is unchanged.
   - Validation for both changes above: 386 Python tests and 22 Node client tests passed;
     Black, Flake8 and diff whitespace checks passed. No live inference was run.
 
@@ -368,7 +389,7 @@ Existing history/benchmark observations are retained and were not independently 
 - [x] ~~Separate title preparation from the generated opening~~ (2026-09-17)
   - Scenario submission generates only a title. Joining players see the host-typed prompt; Start Game generates the opening with all joined names. The prompt requests setting, goal, roles, paragraphs, and consistent physical consequences. These instructions do not guarantee model coherence.
 - [x] ~~Update transcript appearance and distinguish scenario versions~~ (2026-09-17)
-  - Transcripts match the game's green palette and retain both Original scenario prompt and Opening scenario. Private guidance and hidden checks are archived for the server operator, not broadcast to players.
+  - Transcripts match the game's green palette and retain both Original scenario prompt and Opening scenario. Hidden guidance and checks are archived for the host rather than broadcast during play; the host can share the transcript after the session.
 - [x] ~~Correct retained-context display and add operational logging~~ (2026-09-17)
   - Retained context uses backend tokenization when available, with labelled fallback estimates and limit source. Logs cover compaction, inference lifecycle, retries, and private-guidance dice checks.
 - [x] ~~Clean up test artifacts and refresh the documentation~~ (2026-09-17)
@@ -408,7 +429,7 @@ general long-session coherence or OpenAI performance.
 
 - [x] ~~P1 - Supply authoritative facts and private triggers to dice planning~~ (2026-09-14) - logic/llm_manager.py:plan_dice; logic/engine.py:\_resolve_round; config.yaml.
   - Planning asks which rolls originate from private guidance but excludes that guidance. It only sees the latest paragraph, while the system prompt discourages repeating unchanged state; prior obstacles/capabilities can disappear.
-  - Give the planner compact relevant facts/rules and private triggers, distinct from public narrative. Test that generated public prose does not disclose secret checks.
+  - Give the planner compact relevant facts/rules and private triggers, distinct from public narrative. Test that generated public prose preserves unannounced checks during play.
   - Acceptance: persistent injuries, locked doors and hidden hazards affect planning across quiet rounds and compaction; ordinary rolls remain public and private rolls remain private.
   - Implementation: Planner now receives genesis/private rules, durable memory and recent facts. Hidden checks stay out of public dice broadcasts (current server-side transcripts include them), and explicit output disclosures are rejected before history commit.
 

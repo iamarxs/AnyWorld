@@ -2,18 +2,31 @@
 
 [Back to the game overview](README.md)
 
-## Install
+This guide runs the game directly with Python. For Docker, use
+[DOCKER.md](DOCKER.md), including its [Quick Startup](DOCKER.md#quick-startup).
 
-Clone the repository and change into its directory:
+## Download the project
+
+Clone the repository, or download and extract its ZIP from
+[GitHub](https://github.com/iamarxs/AnyWorld). Run commands from the project root:
 
 ```bash
 git clone https://github.com/iamarxs/AnyWorld.git
 cd AnyWorld
 ```
 
-Python 3.11 or newer is required. Run the remaining commands from the repository root. On
-Linux, use `python3` and `venv/bin/activate`; on Windows Git Bash, use `py -3.11` and
-`venv/Scripts/activate` (or replace `-3.11` with your installed Python version).
+## Install
+
+Requires [Python](https://www.python.org/downloads/) 3.11 or newer.
+
+Windows PowerShell:
+
+```powershell
+py -3.11 -m venv venv
+.\venv\Scripts\python.exe -m pip install -e .
+```
+
+Adjust `-3.11` to your installed Python version.
 
 Linux:
 
@@ -31,31 +44,21 @@ source venv/Scripts/activate
 python -m pip install -e .
 ```
 
-For formatting, linting, and tests, install the development extras:
-
-```bash
-python -m pip install -e '.[dev]'
-```
-
-Windows PowerShell (without activating the environment):
-
-```powershell
-py -3.11 -m venv venv
-.\venv\Scripts\python.exe -m pip install -e .
-# After configuring passwords and the model connection:
-.\venv\Scripts\python.exe app.py
-```
-
 ## Configure
 
-Edit `config.yaml` in the project directory before launching. Set `host_password` and
-`player_password` to distinct, nonempty passwords; replace any existing example values as well.
-The application rejects missing or identical passwords, but does not enforce password strength.
-The `null` values below are placeholders, not usable credentials.
+Copy `config.example.yaml` to `config.yaml` before launching:
 
-The following is a configuration outline. Keep the full game instructions in the existing
-`system_prompt` when changing connection settings; the short example here is not a replacement
-for those instructions.
+```powershell
+Copy-Item config.example.yaml config.yaml
+```
+
+On Linux or Git Bash, use `cp config.example.yaml config.yaml` instead.
+Do this only for a new setup; copying again would replace your existing settings.
+The example file is a template and is not loaded automatically.
+
+Set distinct, nonempty `host_password` and `player_password` values. Password
+strength is not enforced. Preserve the complete `system_prompt` from the example;
+the abbreviated outline below is not a replacement configuration.
 
 ```yaml
 server:
@@ -68,13 +71,15 @@ llm:
   provider: "compatible" # use "openai" for the direct OpenAI API
   endpoint: "http://localhost:8033/v1"
   api_key: "sk-no-key-required"
-  context_window_size: 8192 # fallback; llama.cpp auto-detection takes precedence
-  tokenizer_encoding: "cl100k_base"
+  context_window_size: 16384 # used only if local context discovery fails
+  openai_context_window_size: 245760 # keeps OpenAI requests below higher pricing
+  tokenizer_encoding: null # legacy fallback; local llama.cpp uses its own tokenizer
+  openai_tokenizer_encoding: auto
   model_name: "local"
   system_prompt: >
     Direct a coherent multiplayer RPG. Resolve actions simultaneously, preserve established
-    facts and exact player names, and reserve dice for meaningful risks. Keep private
-    guidance secret. Return only the requested structured object.
+    facts and exact player names, and reserve dice for meaningful risks. Keep hidden
+    guidance out of narration during play. Return only the requested structured object.
 ```
 
 Individual settings can be overridden without editing YAML by using the `AD_` prefix and
@@ -101,11 +106,17 @@ llm:
   api_key: "sk-no-key-required"
 ```
 
-Start the local model server before starting Anyworld. Its endpoint must support OpenAI-compatible
-structured chat completion parsing. Anyworld uses llama.cpp `/props`, `/apply-template`, and
-`/tokenize` endpoints when available.
+Start llama-server and load a model before starting Anyworld. The game does not
+install or launch it in a Python setup. For automatic installation, model download
+and startup, use [Docker Quick Startup](DOCKER.md#quick-startup).
 
-To use OpenAI directly, create a `.env` file in the repository root:
+If you already run llama-server, set `endpoint` to its address, including `/v1`,
+and set `model_name` to its served alias. The server
+must support structured responses through the OpenAI-compatible Chat Completions API.
+Anyworld asks llama.cpp for its context limit and token counts when supported.
+
+To use OpenAI directly, follow the [official API setup guide](https://developers.openai.com/api/docs/quickstart)
+for API credentials and billing. Set the key in a project-root `.env` file:
 
 ```dotenv
 AD_OPENAI_API_KEY=your-api-key-here
@@ -113,48 +124,77 @@ AD_OPENAI_API_KEY=your-api-key-here
 
 Keep `.env` private. Anyworld loads `AD_OPENAI_API_KEY` with `python-dotenv` when the provider is
 `openai`; the key does not need to be written into `config.yaml` and is never printed in normal
-logs. Then change the LLM section to:
+logs. Then change these values in the existing `llm` section; keep its other settings
+and full `system_prompt`:
 
 ```yaml
 llm:
   provider: "openai"
   model_name: "gpt-5.6-luna"
-  context_window_size: 1050000
-  tokenizer_encoding: "cl100k_base"
+  context_window_size: 16384 # fallback for local backends
+  openai_context_window_size: 245760 # budget below the long-context pricing threshold
+  openai_tokenizer_encoding: auto # GPT-5.6 maps to o200k_base in tiktoken
   endpoint: "http://localhost:8033/v1" # ignored for provider: openai
   api_key: "sk-no-key-required" # ignored for provider: openai; use AD_OPENAI_API_KEY
 ```
 
 Direct OpenAI support has been tested live with `gpt-5.6-luna`, including scenario titles,
 opening-state generation, dice planning, and round resolution. The model's documented context
-window is approximately 1.05 million tokens; see the [GPT-5.6 Luna model documentation](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
-OpenAI token counters are reported separately from the retained-context indicator; the latter is
-not total game consumption.
+window is approximately 1.05 million tokens, but the example intentionally uses a smaller
+OpenAI budget to avoid long-context pricing; see the explanation below.
+The token display distinguishes retained context from total AI usage.
 
 To switch back, restore `provider: "compatible"`, the local endpoint, and the local model name.
 The `.env` file may remain in place; its key is only used when `provider: "openai"` is selected.
+
+### Context size and OpenAI costs
 
 For local backends, `endpoint` must support OpenAI-compatible structured chat completion parsing.
 `context_window_size` is an optional fallback value. When using a compatible backend, Anyworld
 still attempts to read the context size from the llama.cpp `/props` endpoint even when a value is
 configured. A successful discovery takes precedence; if discovery is unavailable, the configured
-value is used. The default fallback is a conservative 8,192 tokens. OpenAI does not currently
-provide automatic context-limit discovery, so configure this value to the selected model's
-documented limit. The configured value cannot increase the backend's actual capacity.
-llama.cpp token counting uses its `/apply-template` and `/tokenize` endpoints when available.
-For direct OpenAI, a configured `tokenizer_encoding` is used only if it matches the model's known
-tiktoken encoding. Unknown models, mismatches, unavailable endpoints, or `null` encoding use a
-conservative UTF-8-byte estimate. Schema/framing allowances and a safety margin are added; counts
-are not advertised as exact. The token indicator's tooltip describes the counting method.
+value is used. The example uses 16,384 tokens; omitting the setting uses the internal
+default of 8,192. OpenAI does not
+provide automatic context-limit discovery; its optional `openai_context_window_size` setting
+selects a separate fallback (245,760 in the examples). If omitted/null, it continues using
+`context_window_size` for existing configurations. Neither setting increases the backend's
+actual capacity; the configured budget must not exceed the selected model's supported limit.
 
-Optional limits under `llm` (defaults shown) bound model calls. Output caps are selected by
-request type; memory audits share the summary output cap:
+**Why use `openai_context_window_size: 245760` instead of the model's maximum?**
+The currently recommended `gpt-5.6-luna` supports a much larger context, but prompts above
+272,000 input tokens incur higher per-token prices: **2x input and 1.5x output for
+the entire request**, not just the tokens beyond the threshold.
+See the [official model pricing](https://developers.openai.com/api/docs/models/gpt-5.6-luna).
+For models with this pricing rule, 245,760 is a deliberate cost-control budget. It makes
+Anyworld compact the game context before exhausting that smaller budget, rather than waiting
+until the model's maximum context is approached. This leaves 26,240 tokens of headroom below
+the 272,000-token pricing threshold; the request budget also reserves output, schema/framing
+overhead and a safety margin. Keep this value unless you deliberately want larger, more
+expensive requests, and check the chosen model's current pricing when switching models.
+Token bounds remain estimates, so this is a budgeting precaution rather than a billing guarantee.
+
+llama.cpp token counting uses its `/apply-template` and `/tokenize` endpoints when available.
+For OpenAI, `openai_tokenizer_encoding: auto` selects the model's known tiktoken
+encoding. The installed tiktoken maps GPT-5.6 models, including Luna, to `o200k_base`;
+it currently has no GPT-6 mapping. Unknown models, explicit encoding mismatches or
+unavailable encodings use conservative UTF-8-byte estimates. An explicit
+encoding such as `o200k_base` is accepted only when it matches a known model mapping.
+If `openai_tokenizer_encoding` is omitted/null, the legacy `tokenizer_encoding`
+setting applies; setting both to `null` disables local OpenAI tokenization. Neither
+setting overrides llama.cpp's model tokenizer. Schema/framing allowances and a
+safety margin still apply. The token indicator shows the counting method.
+See [OpenAI's token-counting guidance](https://developers.openai.com/api/docs/guides/token-counting)
+for the limitations of local estimates.
+
+### Advanced AI settings
+
+Optional `llm` settings and defaults. Output limits include hidden thinking tokens:
 
 ```yaml
-initial_output_tokens: 1024
-round_output_tokens: 2048
-dice_output_tokens: 512
-summary_output_tokens: 1024
+initial_output_tokens: 4096
+round_output_tokens: 4096
+dice_output_tokens: 768
+summary_output_tokens: 3072
 token_safety_margin: 256
 request_timeout_seconds: 120.0
 max_retries: 1
@@ -162,11 +202,14 @@ max_retries: 1
 
 Additional optional `llm` settings:
 
-| Setting                      | Default | Behavior                                                                                                                                                                                                                                                                                                                                   |
-| ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `reasoning_effort`           | `none`  | Shared thinking effort for compatible and OpenAI backends: `none`, `low`, `medium`, or `high`. Compatible backends receive matching `chat_template_kwargs`; support depends on the loaded model/template. The request reserves 2,048/4,096/8,192 completion tokens for low/medium/high reasoning before the configured visible-output cap. |
-| `compaction_target_fraction` | `0.75`  | After compaction starts, aims to leave the upcoming request within this fraction of the context window. Allowed range: `0.5`–`1.0`.                                                                                                                                                                                                        |
-| `history_round_limit`        | `null`  | Optionally requests earlier memory checkpoints after this many stored request/response pairs, including the generated opening; title generation is not stored. Allowed range: `2`–`100`; this is not a hard history cap.                                                                                                                   |
+| Setting                      | Default | Meaning                                                                                                                                                                                                           |
+| ---------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning_effort`           | `none`  | Requested thinking level: `none`, `low`, `medium` or `high`. Support depends on the model and chat template. `none` is recommended for gameplay.                                                                  |
+| `compaction_target_fraction` | `0.75`  | After summarizing older text, aim to fit the next request within 75% of the configured context. Allowed values: `0.5`–`1.0`.                                                                                      |
+| `history_round_limit`        | `null`  | Optional earlier summary checkpoint after this many saved request/response pairs, including the opening. Allowed values: `2`–`100`; `null` disables this extra trigger. It does not delete history at that count. |
+
+Low, medium and high thinking reserve an additional 2,048, 4,096 or 8,192 output
+tokens.
 
 Scenario titles and the short dice, event-audit, and summary-audit requests force
 `reasoning_effort: none` so their small structured-output budgets are not consumed by hidden
@@ -181,26 +224,28 @@ are rejected while retaining the player's turn. An inference or compaction failu
 with its submitted actions and any existing dice preserved; the host can use **Retry paused round**
 or **End game**. Retrying uses the same dice. Chat stays available during inference.
 
-A normal round uses two generation requests: dice planning and narrative resolution. Compaction
-adds summary and audit requests; retries and backend token-counting requests add further work.
+A basic round asks the AI to plan dice checks and then describe the results.
+Conditional chance rules, eligibility checks and hidden checks can add requests.
+Summaries, audits and retries add more work; token-counting calls also take time.
 The expandable token indicator uses backend tokenization for retained context when available,
 labels conservative fallback estimates, identifies the context-limit source, and shows round/game usage,
 cache counters, errors, retries, and timing. Missing provider counters appear as unknown. Cached
 input still occupies context, and retained context is not the full size of the next request.
 
-Dice planning includes private guidance, durable facts and recent history so old injuries, obstacles
-and secret triggers remain relevant. Public output is instructed to reveal only observable consequences;
-direct guidance echoes and explicit hidden-roll disclosures are rejected. This guard is not a guarantee
-against every possible paraphrase of a secret.
+Dice planning includes hidden guidance, durable facts and recent history so injuries,
+obstacles and event triggers remain relevant. During play, narration presents their
+consequences rather than the underlying instructions. Direct guidance echoes and
+explicit hidden-roll disclosures are rejected, though the model can still reveal
+more than intended.
 
-Scenario setup has two separate optional private fields. **One percentage-based event** is a
-single-line rule with exactly one whole-number percentage from 0–100%; it may be checked every
-round or when a particular event occurs. Only one such event is accepted for a game. **Additional
-freeform DM guidance** is for non-probabilistic steering about the world, story direction, pacing,
-or other compatible presentation choices; percentage rules in that field are rejected. Leave the
-event field blank when no percentage event is needed. The server performs this validation before
-scenario preparation begins. Per-round chance checks are created server-side; the model only
-classifies triggers for conditional rules.
+Scenario setup has **Chance-based event rule (optional)** controls and a separate
+**Additional freeform DM guidance** field. Use the controls for one percentage
+rule per game, including when it applies, who is eligible and what happens.
+Leave Chance empty to disable it. Use hidden guidance for surprises, pacing or
+story direction; percentage rules there are rejected. The old chance-text field
+has been removed. See [the player guide](README.md#optional-private-chance-rule)
+for an example. The server rolls the dice; the AI decides whether described
+conditions apply and writes the result.
 
 Planning instructions default to no roll for routine observations or searches. A concrete
 obstacle, opposition, or hazard can justify a check; atmosphere alone should not. A setting-
@@ -225,8 +270,9 @@ or port loses access to that saved identity. The shared password and name alone 
 an existing player. Private browsing or blocked storage may prevent recovery after closing the
 tab. Sessions created before this recovery feature need one successful login/reconnect in the
 original tab with the updated client before their identity is saved for new-tab recovery.
-Reconnect snapshots restore current state and submitted actions, not the entire past log. The UI
-keeps at most 500 game-log elements (including the banner) and 300 chat entries. The banner is
+Rejoining restores the opening and current state, then catches up on available missed public
+events from History. The on-screen log keeps at most 500 entries (including the banner)
+and chat keeps 300. Use History to browse older public events. The banner is
 the first item in the game pane and scrolls with its contents.
 
 The title-only request uses at most 128 output tokens (or the initial output cap if lower).
@@ -237,6 +283,14 @@ For `provider: compatible`, start your model server first. Development has used 
 compatibility with other servers depends on their structured-response support. For
 `provider: openai`, ensure `.env` contains `AD_OPENAI_API_KEY`; startup fails if it is missing.
 Run from the repository root:
+
+Windows PowerShell:
+
+```powershell
+.\venv\Scripts\python.exe app.py
+```
+
+Linux or Git Bash, with the virtual environment activated:
 
 ```bash
 python app.py
@@ -253,10 +307,30 @@ Other players connect to `https://<server-IP>:4141/` using the server's LAN addr
 address for internet play. Allow the configured TCP port through the firewall; internet play may
 also require router port forwarding. Remove temporary forwarding when the session ends.
 
-### Benchmarking local-model instruction following
+Keep the launch terminal open. Ctrl+C stops the game. Restart with the same
+command. Stopping loses the active game and public History; HTML archives remain
+in `.logged_games/`. Sharing these transcripts after a session is encouraged: they
+include hidden guidance and rolls, letting players see how events were steered.
+If you want to reuse the same surprises, review the transcript before sharing.
+Back up `.logged_games/` while stopped; include `certs/` to preserve certificates
+and the key, keeping that key private.
 
-Use benchmark_chance_events.py to benchmark how your selected local model follows instructions.
-Useful for deciding which model you want to run as your Dungeon Master AI.
+### Troubleshooting
+
+| Problem                              | What to check                                                                                                               |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Python or `py` is not found          | Install Python 3.11 or newer, then open a new terminal.                                                                     |
+| A package cannot be imported         | Use the virtual environment's Python, and install with that same Python.                                                    |
+| Password configuration error         | Both passwords must be filled in and different.                                                                             |
+| YAML error                           | Check spelling and spaces; use the example as a guide and keep the full `system_prompt`.                                    |
+| Model connection fails               | Start llama-server first. Check its address, port and model alias; include `/v1` in the game's endpoint.                    |
+| OpenAI authentication or quota error | Check `.env`, API-key access and API billing.                                                                               |
+| Browser certificate warning          | Use HTTPS and follow the certificate steps below. An account-free Docker tunnel gives a public HTTPS link.                  |
+| Players cannot connect               | `localhost` works only on the host computer. Check the shared address, certificate coverage, firewall and router/VPN route. |
+| A setting change has no effect       | Restart the game. Check `.env` and process `AD_` variables, which take priority over YAML.                                  |
+| A round is paused                    | The host can retry it with the same actions and dice, or end the game. Check the console for the cause.                     |
+
+### Benchmarking local-model instruction following
 
 The chance-event benchmark is an opt-in live-model test. It exercises the configured compatible
 backend with 20 scenarios and 40 action trials: 16 conditional rules each receive one triggering
@@ -293,75 +367,114 @@ the event and its non-triggering action does not; both trials for a per-round ru
 the event. A failed model request is recorded as a failed trial so one backend error does not
 discard the rest of the run.
 
-The report may contain private chance-rule effects and model output. Keep it local and do not use
-it as a player-facing transcript. The benchmark script is the one tracked file under the otherwise
-ignored `benchmarks/` directory; generated JSON reports and the other benchmark scripts remain
-ignored.
+A score below 100% does not mean the model cannot work well as the DM AI. The game
+has built-in response repair and automatic retries for detected inference failures;
+if recovery is exhausted, the host can retry a paused round with the same actions
+and dice. These systems help recover from occasional failures, but cannot correct
+every plausible yet wrong event decision. Use the benchmark alongside actual play
+to assess narration, consistency and reliability. Also note that model tests help
+compare settings; a high score does not guarantee a good Dungeon Master.
+
+Benchmark reports include chance-rule effects and model output. They are diagnostic
+results rather than full game transcripts. The benchmark script is the one tracked
+file under the otherwise ignored `benchmarks/` directory; generated JSON reports
+and other benchmark scripts remain ignored.
 
 ### AI model recommendation
 
-During development, Gemma 4 26B A4B with a 128k context was used as the DM AI.
-This is a record of the project's setup, not a minimum requirement or a guarantee of story quality.
-Smaller context limits require more frequent summaries; memory checks cannot guarantee perfect recall.
+For a 16 GB NVIDIA GPU, the recommended local model is:
 
-The model I can definitely recommend is:
-[mradermacher/gemma-4-19B-A4B-it-The-DECKARD-Thinking-i1-GGUF](https://huggingface.co/mradermacher/gemma-4-19B-A4B-it-The-DECKARD-Thinking-i1-GGUF).
+- Repository: [EZForever/gemma-4-26B-A4B-it-qat-uncensored-heretic-UDmerge-GGUF](https://huggingface.co/EZForever/gemma-4-26B-A4B-it-qat-uncensored-heretic-UDmerge-GGUF).
+- File: `gemma-4-26B-A4B-it-qat-uncensored-heretic-UDmerge-Q4_K_XXL.gguf`.
 
-With the below settings, the model proved to be a strong LLM for acting as the game's AI DM.
-Its size makes it also a good choice for VRAM-low setups.
+Weights occupy about 14.3 GB, excluding KV cache and runtime allocations.
+The supplied settings passed a short game on a 16 GB RTX 5070 Ti, but the
+131,072-token setting is not guaranteed to fit every 16 GB card. CPU-only
+inference is too slow for the supported game setup.
 
-Another recommended model, will also work great with the below settings:
-[EZForever/gemma-4-26B-A4B-it-qat-uncensored-heretic-UDmerge-GGUF](https://huggingface.co/EZForever/gemma-4-26B-A4B-it-qat-uncensored-heretic-UDmerge-GGUF).
+[Docker Quick Startup](DOCKER.md#quick-startup) downloads this model and uses the
+included canonical chat template. The template permits thinking, but
+`reasoning_effort: none` is recommended for gameplay.
 
-**These sampling settings provided a more than adequate game experience with a Q4 quantized Gemma 4:**
+These model-server settings worked well during development:
 
-```yaml
-temperature: 1.0
-top-p: 0.95
-top-k: 20
-min-p: 0.0
-presence-penalty: 0.0
-repeat-penalty: 1.0
-```
+| Setting                                 | Value  |
+| --------------------------------------- | ------ |
+| Temperature (`--temp`)                  | `1.0`  |
+| Top-p (`--top-p`)                       | `0.95` |
+| Top-k (`--top-k`)                       | `20`   |
+| Min-p (`--min-p`)                       | `0.0`  |
+| Presence penalty (`--presence-penalty`) | `0.0`  |
+| Repeat penalty (`--repeat-penalty`)     | `1.0`  |
 
-Configure these in the model server; Anyworld does not set them.
-
-Of course, feel free to try out your own models!
+Set these in llama-server, not the game's YAML. The complete local launch settings
+are in `compose.llama.yaml`. Other models may need different settings. Smaller
+context limits cause more frequent summaries; summary checks do not guarantee
+perfect recall.
 
 ### HTTPS certificates
 
-`api/tls_bootstrap.py` creates `certs/cert.pem` and `certs/key.pem`. It attempts public-IP
-discovery via external services, falling back to a local interface address. Certificates cover
-that detected IP and `127.0.0.1`, last 825 days, and are regenerated at startup when missing,
-within 30 days of expiry, or no longer covering the detected IP. They do not include the
-`localhost` hostname or every LAN address.
+The launcher uses HTTPS with `certs/cert.pem` and `certs/key.pem`.
 
-**Browsers will display a warning to joining players because the certificate is self-signed**
-("Your connection is not private"), and may also report an address mismatch when using a
-different address from the primary LAN or WAN IPs. For a server you recognize and trust,
-a joining player can use the browser's certificate exception that's available in most modern
-browsers and allows to continue to the site.
+By default, the launcher tries to find the computer's public IP address, falling
+back to a local address. The generated certificate covers that address,
+`127.0.0.1`, `::1` and `localhost`. If players connect through another IP or name,
+list the addresses explicitly to avoid an address mismatch. For example, with
+an activated Python environment:
 
-The host can also send players the cert.pem file, which they can then deploy to their browser's
-trusted certificate storage, allowing them to join without issues or warnings.
+```bash
+anyworld --tls-address localhost --tls-address 192.168.1.50
+```
 
-**Never give out the private key.pem file**, as it will allow a malicious attacker to impersonate
-your server.
+Replace `192.168.1.50` with your computer's actual local network address. In
+PowerShell without activation, use `.\venv\Scripts\python.exe app.py` followed
+by the same flags. You can instead put `tls_addresses: ["localhost", "192.168.1.50"]`
+under `server` in `config.yaml`. Explicit addresses skip automatic IP discovery.
+Docker sets these addresses through `TLS_ADDRESSES` in `docker.env`.
 
-One more option is that the host can create a reverse proxy, circumventing the need to hand out
-the public certificate file.
+Generated certificates are self-signed. Accept the browser exception for a trusted
+server, or install `cert.pem` in the client's trust store. **Never share `key.pem`.**
+
+Certificates last 825 days. At startup, the launcher replaces a generated pair
+if it is missing, expires within 30 days or does not cover the requested addresses.
+Changing settings does not update a running process; restart after changes.
+
+If you already have a certificate and matching key, set `tls_certfile` and
+`tls_keyfile` under `server`, or use `--tls-certfile` and `--tls-keyfile`.
+Also list the addresses the certificate covers with `tls_addresses`. Supplied
+files must match, cover those addresses and remain valid for more than 30 days.
+The launcher checks them but does not renew them.
+
+For a public link without browser certificate warnings or router changes, use
+[the Docker tunnel](DOCKER.md#quick-startup). A separately configured HTTPS proxy
+is also possible; it needs to support WebSocket connections.
 
 ### Server lifecycle
 
 One server process hosts one in-memory game. Multiple workers and concurrent independent games
 are not supported. Restarting loses the live session; the HTML transcript is a record, not a
-loadable save. After ending a game, restart the server to begin another.
+loadable save. After ending a game, the host can select **Start new game** without
+restarting the server. Players join again once the new scenario is ready.
 
 Restart after configuration changes. CLI overrides are available as `--host` and `--port`, for
 example `anyworld --host 0.0.0.0 --port 4141`. Development reload is available with
 `python app.py --reload`; code-triggered reloads also reset the in-memory game.
 
+## Docker deployment
+
+See [DOCKER.md](DOCKER.md) for container installation, configuration and operation.
+
 ## Quality checks
+
+Install developer dependencies in the virtual environment:
+
+```bash
+python -m pip install -e '.[dev]'
+```
+
+In PowerShell without activation, replace `python` with `.\venv\Scripts\python.exe`.
+For the following checks, use an activated environment, or run each Python tool
+as `.\venv\Scripts\python.exe -m black`, `-m flake8` or `-m pytest`.
 
 Set `PYTHONDONTWRITEBYTECODE=1` before the checks: `export PYTHONDONTWRITEBYTECODE=1`
 in Bash, or `$env:PYTHONDONTWRITEBYTECODE = "1"` in PowerShell.
@@ -391,30 +504,35 @@ existing overall job deadline (three times `request_timeout_seconds`); expiratio
 even if retries remain. Per-request `max_retries` repairs still apply inside each round attempt.
 Scenario preparation is not automatically retried by this round-level recovery.
 
-The game logs quite a bit of its behavior to the console. Logs include compaction stages,
+Console logs include compaction stages,
 estimates, timing and rollback; inference jobs, retries, accepted actions, and transcript writes.
 Private-guidance checks log player names, roll values, and whether a retry reused the rolls.
-These logs are for the server operator; private checks are not broadcast to players.
+These checks are logged on the server rather than broadcast during play.
+
+The console displays Uvicorn's `uvicorn.error` logger as `uvicorn.server`.
+The level (`INFO`, `WARNING` or `ERROR`) indicates severity; normal WebSocket
+connection messages are informational.
 
 ### Raw model responses
 
-To investigate generated wording, launch with `python app.py --debug` or
-`anyworld --debug-raw-responses`. The flag also works with `--reload` and enables logging
-for that launch without changing `config.yaml`. Alternatively, set `debug_raw_responses: true`
-under `llm` in the configuration. Raw-response file logging is disabled by default. Restarting the application
-resets the current game. Each completion HTTP response is saved as a timestamped JSON file under
-`.debug/llm/` in the working directory. The `body` field contains the raw response text,
-recorded before SDK parsing, narrative checks, name normalization, or display. This includes
-responses rejected during retries and HTTP error responses. The `thinking_sequences` field
-extracts `reasoning_content` (or `thinking`) from each completion choice when the backend
-provides it. A request record is written before waiting for the backend, so timeouts and
-connection failures still leave the sent request in the diagnostic file; its response fields
-remain null when no HTTP response arrives.
+For detailed AI diagnostics, run `python app.py --debug` or
+`anyworld --debug-raw-responses`. In PowerShell without activation, use
+`.\venv\Scripts\python.exe app.py --debug`. Alternatively, set
+`debug_raw_responses: true` under `llm` in `config.yaml`. Docker uses
+`compose.debug.yaml` and saves diagnostics in the host project folder `data/debug/`.
 
-These files are private diagnostics: model output can include hidden dice or private guidance,
-and error bodies can contain sensitive data. They are excluded from Git and are not served by
-the web app. The `request` field contains the sent method, path, and body; headers and
-credentials are excluded. Files are not automatically rotated; disable the option after
-diagnosis and remove unneeded logs.
-Sampling settings remain controlled by the backend; Anyworld does not override repetition or
-presence penalties.
+This option is off by default. It writes readable `.log` files in `.debug/llm/`.
+They show the request, response, request type, time and HTTP status. AI responses
+are captured before the game parses or checks them, including rejected responses
+and errors. If the backend supplies thinking fields, those are included too.
+Round requests may first appear as `.tmp` files; completed round diagnostics are
+combined into a single `.log`. A failed or interrupted round can leave temporary
+files for diagnosis. A request is recorded before waiting for the response, so
+connection failures can still leave a useful record.
+
+These host-side diagnostics include hidden rolls, guidance and model output.
+Review them before sharing if you want to preserve surprises for future sessions.
+Request headers and API credentials are excluded. The game does not serve these
+files to browsers, and Git ignores them. They are not automatically
+rotated or deleted: disable debug logging after diagnosis and remove files you no
+longer need. Restarting to change debug settings loses the current game.
