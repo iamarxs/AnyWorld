@@ -12,7 +12,17 @@ from core.console_logging import ModuleFormatter
 from support import FakeResolver
 
 
-@pytest.mark.parametrize("hostname", ["adventure.trycloudflare.com", "bad.example\nmisleading log"])
+@pytest.mark.parametrize(
+    "hostname",
+    [
+        "adventure.trycloudflare.com",
+        "bad.example\nmisleading log",
+        "adventure.trycloudflare.com.evil.example",
+        "evil.example/trycloudflare.com",
+        "evil.example@adventure.trycloudflare.com",
+        "nottrycloudflare.com",
+    ],
+)
 def test_tunnel_banner_requires_ready_connection_and_valid_hostname(monkeypatch, caplog, hostname):
     requests = []
     attempted = asyncio.Event()
@@ -48,9 +58,11 @@ def test_tunnel_banner_requires_ready_connection_and_valid_hostname(monkeypatch,
 
     asyncio.run(run())
     assert requests[:3] == ["/ready", "/ready", "/quicktunnel"]
-    assert ("Share this address with players:" in caplog.text) is hostname.endswith(
-        "trycloudflare.com"
+    assert ("Share this address with players:" in caplog.text) is (
+        hostname == "adventure.trycloudflare.com"
     )
+    if hostname == "adventure.trycloudflare.com":
+        assert "https://adventure.trycloudflare.com" in caplog.records[-1].getMessage().splitlines()
 
 
 def test_game_shutdown_cancels_optional_tunnel_watcher(monkeypatch):
