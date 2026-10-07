@@ -3,6 +3,7 @@
 import datetime
 import ipaddress
 import logging
+import os
 import socket
 import re
 from uuid import uuid4
@@ -96,6 +97,12 @@ def _validate_pair(cert_path: Path, key_path: Path, addresses: list[str]) -> Non
         ) from exc
 
 
+def _write_private_key(path: Path, content: bytes) -> None:
+    """Create a new key file with owner-only permissions before writing any bytes."""
+    with open(path, "xb", opener=lambda name, flags: os.open(name, flags, 0o600)) as stream:
+        stream.write(content)
+
+
 def _generate_cert(ip: str, addresses: list[str] | None = None) -> tuple[Path, Path]:
     """Generate a self-signed certificate and key covering the given IP."""
     CERT_DIR.mkdir(exist_ok=True)
@@ -139,14 +146,14 @@ def _generate_cert(ip: str, addresses: list[str] | None = None) -> tuple[Path, P
         # Save only the files we own; explicitly supplied pairs never enter here.
         for target in (CERT_PATH, KEY_PATH):
             previous[target] = target.read_bytes() if target.exists() else None
-        key_path.write_bytes(
+        _write_private_key(
+            key_path,
             key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption(),
-            )
+            ),
         )
-        key_path.chmod(0o600)
         cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
         _validate_pair(cert_path, key_path, addresses or [ip])
         for source, target in ((cert_path, CERT_PATH), (key_path, KEY_PATH)):
@@ -161,9 +168,10 @@ def _generate_cert(ip: str, addresses: list[str] | None = None) -> tuple[Path, P
             else:
                 rollback = CERT_DIR / f"{target.stem}-rollback-{transaction}.tmp"
                 temporary.append(rollback)
-                rollback.write_bytes(content)
                 if target == KEY_PATH:
-                    rollback.chmod(0o600)
+                    _write_private_key(rollback, content)
+                else:
+                    rollback.write_bytes(content)
                 rollback.replace(target)
         raise
     finally:

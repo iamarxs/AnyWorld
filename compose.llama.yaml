@@ -5,6 +5,11 @@ services:
     pull_policy: missing
     restart: unless-stopped
     init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       LLAMA_CACHE: /models
       HF_TOKEN: ${HF_TOKEN:-}

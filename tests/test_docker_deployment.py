@@ -72,7 +72,13 @@ def compose_config(tmp_path, *, debug=False, tunnel=False, missing=None, openai=
         assert result.returncode != 0
         return
     assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    config = json.loads(result.stdout)
+    for service in config["services"].values():
+        assert service["logging"] == {
+            "driver": "json-file",
+            "options": {"max-size": "10m", "max-file": "3"},
+        }
+    return config
 
 
 @pytest.mark.parametrize("debug", [False, True])

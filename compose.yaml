@@ -5,6 +5,11 @@ services:
     build: .
     restart: unless-stopped
     init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       AD_CONFIG_PATH: /config/game.yaml
       AD_SERVER__HOST_PASSWORD: ${AD_SERVER__HOST_PASSWORD:?Set a distinct host password}
@@ -48,6 +53,11 @@ services:
     image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
     pull_policy: missing
     profiles: [tunnel]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
     user: "65532:65532"
     depends_on:

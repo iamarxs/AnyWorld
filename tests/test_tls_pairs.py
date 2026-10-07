@@ -1,11 +1,34 @@
 """Certificate validation, staged renewal and rollback without network I/O."""
 
 from pathlib import Path
+import os
 import subprocess
 
 import pytest
 
 from api import tls_bootstrap as tls
+
+
+def test_private_key_is_restricted_at_creation_and_never_overwrites(monkeypatch):
+    path = Path("private.tmp")
+    original_open = os.open
+    observed = []
+
+    def inspect_open(name, flags, mode=0o777):
+        descriptor = original_open(name, flags, mode)
+        observed.append((flags, mode))
+        if os.name == "posix":
+            assert os.fstat(descriptor).st_mode & 0o777 == 0o600
+            assert os.fstat(descriptor).st_size == 0
+        return descriptor
+
+    monkeypatch.setattr(os, "open", inspect_open)
+    tls._write_private_key(path, b"test key")
+    assert observed and observed[0][0] & os.O_EXCL and observed[0][1] == 0o600
+    assert path.read_bytes() == b"test key"
+    with pytest.raises(FileExistsError):
+        tls._write_private_key(path, b"replacement")
+    assert path.read_bytes() == b"test key"
 
 
 def test_explicit_addresses_and_matching_pair():
