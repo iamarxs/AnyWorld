@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import subprocess
 import time
@@ -205,7 +206,11 @@ def main():
                                 text=True,
                             ).stdout
                             if "Share this address with players:" in logs:
-                                assert "https://" in logs and ".trycloudflare.com" in logs
+                                url_line = logs.split("Share this address with players:", 1)[1]
+                                public_url = url_line.splitlines()[1].rsplit("|", 1)[-1].strip()
+                                assert re.fullmatch(
+                                    r"https://[a-z0-9-]+\.trycloudflare\.com", public_url
+                                )
                                 assert "uvicorn.error:" not in logs
                                 assert "uvicorn.server:" in logs
                                 print("Live Quick Tunnel URL announcement and logger alias passed")
