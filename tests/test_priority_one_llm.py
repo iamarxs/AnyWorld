@@ -66,7 +66,10 @@ def test_every_request_caps_output_and_counts_backend_template(
         manager.budget._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
         await manager._parse([{"role": "user", "content": "Act"}], schema, kind)
         request = client.calls[0]
-        assert request["reasoning_effort"] == effective_effort
+        if provider == "openai":
+            assert request["reasoning_effort"] == effective_effort
+        else:
+            assert "reasoning_effort" not in request
         visible_cap = getattr(settings.llm, f"{kind}_output_tokens")
         thinking_cap = {"none": 0, "low": 2_048, "medium": 4_096, "high": 8_192}[effective_effort]
         assert request[cap_key] == visible_cap + thinking_cap

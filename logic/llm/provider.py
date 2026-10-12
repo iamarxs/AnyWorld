@@ -88,7 +88,7 @@ async def attempt(
                 model=settings.llm.model_name,
                 messages=messages,
                 response_format=schema,
-                reasoning_effort=effort,
+                **({"reasoning_effort": effort} if settings.llm.provider == "openai" else {}),
                 **({"extra_body": template_options} if template_options else {}),
                 **{cap_key: self.budget.request_output_limit(kind)},
             )
