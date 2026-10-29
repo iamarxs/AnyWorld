@@ -47,6 +47,7 @@ def test_concurrent_schema_counts_share_backend_work():
     async def run():
         settings.llm.provider = "compatible"
         manager = LLMContextManager(FakeClient())
+        manager.budget._llama_cpp_detected = True
         paths = []
 
         async def respond(request):

@@ -9,7 +9,6 @@ import subprocess
 from uuid import uuid4
 
 import pytest
-import yaml
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -27,16 +26,23 @@ ROOT = Path(__file__).resolve().parents[1]
 def compose_config(tmp_path, *, debug=False, tunnel=False, missing=None, openai=False):
     if not shutil.which("docker"):
         pytest.skip("Docker Compose CLI is needed; no daemon or downloads are used")
+    game_config = ROOT / "config.example.yaml"
+    if openai:
+        config_text = game_config.read_text("utf-8")
+        config_text = config_text.replace('provider: "compatible"', 'provider: "openai"', 1)
+        config_text = config_text.replace(
+            'model_name: "local"', 'model_name: "test-openai-model"', 1
+        )
+        game_config = tmp_path / "openai-config.yaml"
+        game_config.write_text(config_text, "utf-8")
     values = {
         "HF_REPO": "" if openai else "test/model",
         "HF_FILE": "" if openai else "test.gguf",
         "HF_TOKEN": "",
-        "OPENAI_MODEL": "test-openai-model",
-        "AD_OPENAI_API_KEY": "test-only-not-a-real-key",
         "MODEL_ALIAS": "test-model",
         "AD_SERVER__HOST_PASSWORD": "test-host",
         "AD_SERVER__PLAYER_PASSWORD": "test-player",
-        "GAME_CONFIG": (ROOT / "docker/game.example.yaml").as_posix(),
+        "GAME_CONFIG": game_config.as_posix(),
         "CHAT_TEMPLATE_FILE": "./docker/templates/google-gemma-4-canonical-templ.jinja",
         "LLAMA_IMAGE": "ghcr.io/ggml-org/llama.cpp:server-cuda",
         "CLOUDFLARED_IMAGE": "cloudflare/cloudflared:latest",
@@ -62,8 +68,12 @@ def compose_config(tmp_path, *, debug=False, tunnel=False, missing=None, openai=
     if tunnel:
         command += ["--profile", "tunnel"]
     result = subprocess.run(
-        command + ["config", "--format", "json"],
-        env={key: value for key, value in os.environ.items() if key not in values},
+        command + ["config", "--no-env-resolution", "--format", "json"],
+        env={
+            key: value
+            for key, value in os.environ.items()
+            if key not in values and key != "AD_OPENAI_API_KEY"
+        },
         capture_output=True,
         text=True,
         timeout=30,
@@ -147,25 +157,30 @@ def test_openai_selection_has_no_local_backend_or_model_requirements(tmp_path, d
     assert "llama" not in config["services"] and "models" not in config["volumes"]
     game = config["services"]["game"]
     assert "depends_on" not in game
-    assert game["environment"]["AD_LLM__PROVIDER"] == "openai"
-    assert game["environment"]["AD_LLM__MODEL_NAME"] == "test-openai-model"
+    assert "AD_LLM__PROVIDER" not in game["environment"]
+    assert "AD_LLM__MODEL_NAME" not in game["environment"]
+    assert Path(game["env_file"][0]["path"]).name == ".env"
     assert game["environment"]["AD_LLM__DEBUG_RAW_RESPONSES"] == str(debug).lower()
+    config_source = next(
+        mount["source"] for mount in game["volumes"] if mount["target"] == "/config/game.yaml"
+    )
+    config_text = Path(config_source).read_text("utf-8")
+    assert 'provider: "openai"' in config_text and 'model_name: "test-openai-model"' in config_text
 
 
-@pytest.mark.parametrize("missing", ["OPENAI_MODEL", "AD_OPENAI_API_KEY"])
-def test_openai_selection_requires_its_own_configuration(tmp_path, missing):
-    compose_config(tmp_path, openai=True, missing=missing)
+def test_cloud_selection_loads_shared_dotenv_without_extra_compose_flags(tmp_path):
+    config = compose_config(tmp_path, openai=True)
+    game = config["services"]["game"]
+    assert Path(game["env_file"][0]["path"]).name == ".env"
+    assert "AD_LLM__API_KEY" not in game["environment"]
 
 
-def test_game_example_loads_container_environment_and_preserves_prompt(monkeypatch):
-    game = yaml.safe_load((ROOT / "docker/game.example.yaml").read_text("utf-8"))
-    original = yaml.safe_load((ROOT / "config.example.yaml").read_text("utf-8"))
-    assert game["llm"]["system_prompt"] == original["llm"]["system_prompt"]
+def test_config_example_loads_container_environment(monkeypatch):
     monkeypatch.setenv("AD_SERVER__TLS_ADDRESSES", '["game","localhost","127.0.0.1"]')
     monkeypatch.setenv("AD_SERVER__TRUSTED_PROXIES", '["172.30.41.2/32"]')
     monkeypatch.setenv("AD_LLM__DEBUG_RAW_RESPONSES", "false")
     monkeypatch.setenv("AD_LLM__OPENAI_CONTEXT_WINDOW_SIZE", "245760")
-    loaded = Settings.load(ROOT / "docker/game.example.yaml")
+    loaded = Settings.load(ROOT / "config.example.yaml")
     assert loaded.server.tls_addresses[0] == "game"
     assert loaded.server.trusted_proxies == ["172.30.41.2/32"]
     assert not loaded.llm.debug_raw_responses and loaded.llm.reasoning_effort == "none"

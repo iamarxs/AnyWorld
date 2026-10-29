@@ -48,6 +48,7 @@ def test_every_request_caps_output_and_counts_backend_template(
         client = FakeClient()
         manager = LLMContextManager(client)
         manager.context_window_size = 32_768
+        manager.budget._llama_cpp_detected = provider == "compatible"
         seen = []
 
         def backend(request):
@@ -113,6 +114,36 @@ def test_title_request_disables_reasoning_even_when_game_effort_is_high():
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("provider", ["openai", "compatible"])
+def test_configured_sampling_parameters_are_sent_only_when_set(provider):
+    async def run():
+        settings.llm.provider = provider
+        settings.llm.temperature = 0.7
+        settings.llm.top_p = 0.9
+        settings.llm.presence_penalty = 0.3
+        client = FakeClient()
+        manager = LLMContextManager(client)
+        await manager._parse([{"role": "user", "content": "Act"}], RoundResolution, "round")
+        request = client.calls[0]
+        assert request["temperature"] == 0.7
+        assert request["top_p"] == 0.9
+        assert request["presence_penalty"] == 0.3
+        assert "top_k" not in request and "min_p" not in request and "repeat_penalty" not in request
+        if provider == "compatible":
+            settings.llm.top_k = 40
+            settings.llm.min_p = 0.05
+            settings.llm.repeat_penalty = 1.1
+            await manager._parse([{"role": "user", "content": "Again"}], RoundResolution, "round")
+            assert client.calls[1]["extra_body"] == {
+                "top_k": 40,
+                "min_p": 0.05,
+                "repeat_penalty": 1.1,
+            }
+        await manager.close()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize(
     "kind,schema",
     [
@@ -156,8 +187,31 @@ def test_context_discovery_recovers_after_backend_outage():
         manager.budget._discovery_retry_at = 0
         await manager.discover_context_window()
         assert manager.context_window_size == 128000
+        assert manager.budget._llama_cpp_detected
         await manager.discover_context_window()
         assert len(requests) == 2
+        await manager.close()
+
+    asyncio.run(run())
+
+
+def test_generic_compatible_backend_is_detected_without_llama_cpp_routes():
+    async def run():
+        settings.llm.provider = "compatible"
+        manager = LLMContextManager(FakeClient())
+        paths = []
+
+        def backend(request):
+            paths.append(request.url.path)
+            return httpx.Response(404)
+
+        manager.budget._http = httpx.AsyncClient(transport=httpx.MockTransport(backend))
+        await manager.discover_context_window()
+        assert manager.budget._context_discovered
+        assert not manager.budget._llama_cpp_detected
+        assert manager.budget.template_options() == {}
+        await manager.budget.input_tokens([{"role": "user", "content": "Hello"}], None)
+        assert paths == ["/props"]
         await manager.close()
 
     asyncio.run(run())

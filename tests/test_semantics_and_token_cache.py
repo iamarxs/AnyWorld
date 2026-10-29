@@ -134,6 +134,7 @@ def test_request_token_cache_is_bounded_and_invalidates_on_input_and_template_ch
     async def run():
         settings.llm.provider = "compatible"
         manager = LLMContextManager(FakeClient())
+        manager.budget._llama_cpp_detected = True
         calls = []
 
         def backend(request):
@@ -184,6 +185,7 @@ def test_preflight_measures_each_prompt_and_reuses_schema_tokenization():
         settings.llm.provider = "compatible"
         manager = LLMContextManager(FakeClient())
         manager.budget._context_discovered = True
+        manager.budget._llama_cpp_detected = True
         calls = []
 
         def backend(request):
@@ -218,6 +220,7 @@ def test_failed_tokenization_is_retried_for_another_schema():
     async def run():
         settings.llm.provider = "compatible"
         manager = LLMContextManager(FakeClient())
+        manager.budget._llama_cpp_detected = True
         available = False
 
         def backend(request):

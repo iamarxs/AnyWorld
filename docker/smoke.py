@@ -11,6 +11,8 @@ import time
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 
 FAKE_BACKEND = """
@@ -96,12 +98,10 @@ def main():
         HF_REPO="smoke/not-downloaded",
         HF_FILE="not-downloaded.gguf",
         HF_TOKEN="",
-        OPENAI_MODEL="smoke-not-called",
-        AD_OPENAI_API_KEY="smoke-not-a-real-key",
         MODEL_ALIAS="smoke",
         AD_SERVER__HOST_PASSWORD=secrets.token_urlsafe(24),
         AD_SERVER__PLAYER_PASSWORD=secrets.token_urlsafe(24),
-        GAME_CONFIG=(ROOT / "docker/game.example.yaml").as_posix(),
+        GAME_CONFIG=(ROOT / "config.example.yaml").as_posix(),
         CHAT_TEMPLATE_FILE=(
             ROOT / "docker/templates/google-gemma-4-canonical-templ.jinja"
         ).as_posix(),
@@ -124,6 +124,8 @@ def main():
         with TemporaryDirectory(prefix=project) as directory:
             empty_env = Path(directory) / "empty.env"
             empty_env.touch()
+            api_env = Path(directory) / "smoke-api.env"
+            api_env.write_text("AD_LLM__API_KEY=smoke-not-a-real-key\n", encoding="utf-8")
             for backend, debug in (
                 ("llama", False),
                 ("llama", True),
@@ -131,6 +133,15 @@ def main():
                 ("openai", True),
             ):
                 variant = project + "-" + backend + ("-debug" if debug else "-normal")
+                game_config = yaml.safe_load(
+                    (ROOT / "config.example.yaml").read_text(encoding="utf-8")
+                )
+                if backend == "openai":
+                    game_config["llm"]["provider"] = "openai"
+                    game_config["llm"]["model_name"] = "smoke-not-called"
+                config_path = Path(directory) / (variant + ".yaml")
+                config_path.write_text(yaml.safe_dump(game_config), encoding="utf-8")
+                environment["GAME_CONFIG"] = config_path.as_posix()
                 source = [
                     "docker",
                     "compose",
@@ -149,12 +160,18 @@ def main():
                 if debug:
                     source += ["-f", str(ROOT / "compose.debug.yaml")]
                 resolved = run(
-                    source + ["config", "--format", "json"], capture_output=True, text=True
+                    source + ["config", "--no-env-resolution", "--format", "json"],
+                    capture_output=True,
+                    text=True,
                 )
                 config = json.loads(resolved.stdout)
                 if not use_tunnel:
                     config["services"].pop("tunnel", None)
                 game = config["services"]["game"]
+                # Keep smoke containers from inheriting the developer's project .env.
+                game["env_file"] = [{"path": api_env.as_posix(), "required": False}]
+                # Keep smoke containers from inheriting the developer's project .env.
+                game["env_file"] = [{"path": empty_env.as_posix(), "required": False}]
                 # Keep acceptance checks away from the host's real archives.
                 for mount in game["volumes"]:
                     if mount["target"] in ("/app/.logged_games", "/app/.debug"):

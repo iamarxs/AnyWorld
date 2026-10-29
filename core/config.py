@@ -15,8 +15,8 @@ DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 PACKAGED_CONFIG_PATH = Path(__file__).with_name("defaults.yaml")
 
 # Load local secrets before settings are created, without overwriting variables supplied
-# by the process environment. ``AD_OPENAI_API_KEY`` is consumed below only for the
-# direct OpenAI provider.
+# by the process environment. ``AD_LLM__API_KEY`` is shared; the legacy
+# ``AD_OPENAI_API_KEY`` remains accepted for direct OpenAI setups.
 load_dotenv(PROJECT_ROOT / ".env", override=False)
 
 
@@ -37,6 +37,12 @@ class LLMConfig(BaseModel):
     tokenizer_encoding: str | None = Field(default="cl100k_base")
     openai_tokenizer_encoding: str | None = Field(default=None)
     model_name: str = Field(default="local", min_length=1)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    top_k: int | None = Field(default=None, ge=0)
+    min_p: float | None = Field(default=None, ge=0, le=1)
+    presence_penalty: float | None = Field(default=None, ge=-2, le=2)
+    repeat_penalty: float | None = Field(default=None, gt=0)
     system_prompt: str = Field(min_length=1)
     initial_output_tokens: int = Field(default=4_096, ge=64)
     round_output_tokens: int = Field(default=4_096, ge=64)
@@ -49,6 +55,15 @@ class LLMConfig(BaseModel):
     debug_raw_responses: bool = False
     compaction_target_fraction: float = Field(default=0.75, ge=0.5, le=1.0)
     history_round_limit: int | None = Field(default=None, ge=2, le=100)
+
+    @model_validator(mode="after")
+    def validate_provider_parameters(self) -> "LLMConfig":
+        """Reject sampling controls not supported by the direct OpenAI API."""
+        if self.provider == "openai" and any(
+            value is not None for value in (self.top_k, self.min_p, self.repeat_penalty)
+        ):
+            raise ValueError("top_k, min_p, and repeat_penalty require provider 'compatible'")
+        return self
 
 
 class ServerConfig(BaseModel):
@@ -122,9 +137,9 @@ class Settings(BaseSettings):
     def load(cls, path: str | Path | None = None) -> "Settings":
         """Load YAML, apply ``AD_`` overrides, and validate the merged settings.
 
-        When the direct OpenAI provider is selected, ``AD_OPENAI_API_KEY`` is the only
-        accepted API-key source. It is never written back to the configuration file or
-        included in diagnostics.
+        ``AD_LLM__API_KEY`` is the shared API-key source. The legacy
+        ``AD_OPENAI_API_KEY`` remains accepted for direct OpenAI setups. Secrets are
+        never written back to configuration files or included in diagnostics.
         """
         if path is not None:
             config_path = Path(path)
@@ -152,12 +167,12 @@ class Settings(BaseSettings):
         environment_data = EnvSettingsSource(cls)()
         merged_data = cls._merge_mappings(raw_data, environment_data)
         llm_data = merged_data.get("llm")
-        openai_api_key = os.environ.get("AD_OPENAI_API_KEY")
+        api_key = os.environ.get("AD_LLM__API_KEY") or os.environ.get("AD_OPENAI_API_KEY")
         if isinstance(llm_data, dict) and llm_data.get("provider") == "openai":
-            if not openai_api_key:
-                raise ConfigLoadError("AD_OPENAI_API_KEY must be set when provider is 'openai'")
+            if not api_key:
+                raise ConfigLoadError("AD_LLM__API_KEY must be set when provider is 'openai'")
             # Keep the secret in memory only; never include it in config diagnostics/logs.
-            llm_data["api_key"] = openai_api_key
+            llm_data["api_key"] = api_key
         return cls.model_validate(merged_data)
 
     @staticmethod

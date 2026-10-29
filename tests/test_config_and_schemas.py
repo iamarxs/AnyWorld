@@ -100,8 +100,8 @@ llm:
     assert loaded.llm.system_prompt == "Direct the game."
 
 
-def test_openai_api_key_comes_from_environment(tmp_path: Path, monkeypatch) -> None:
-    """Use AD_OPENAI_API_KEY for the direct provider without requiring it in YAML."""
+def test_shared_api_key_overrides_legacy_openai_key(tmp_path: Path, monkeypatch) -> None:
+    """Prefer the shared API-key variable while retaining the legacy alias."""
     config = tmp_path / "config.yaml"
     config.write_text(
         """
@@ -119,13 +119,12 @@ llm:
 
     loaded = Settings.load(config)
 
-    assert loaded.llm.api_key == "test-secret"
+    assert loaded.llm.api_key == "nested-secret"
+    assert loaded.llm.temperature is None and loaded.llm.top_k is None
 
 
-def test_openai_api_key_does_not_fall_back_to_legacy_environment(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """Require AD_OPENAI_API_KEY instead of accepting legacy or YAML keys."""
+def test_openai_key_accepts_legacy_environment_alias(tmp_path: Path, monkeypatch) -> None:
+    """Keep existing direct-OpenAI deployments working with their old key name."""
     config = tmp_path / "config.yaml"
     config.write_text(
         """
@@ -136,12 +135,50 @@ llm:
 """,
         encoding="utf-8",
     )
-    monkeypatch.delenv("AD_OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AD_OPENAI_API_KEY", "legacy-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "stale-secret")
-    monkeypatch.setenv("AD_LLM__API_KEY", "nested-secret")
+    monkeypatch.delenv("AD_LLM__API_KEY", raising=False)
 
-    with pytest.raises(ConfigLoadError, match="AD_OPENAI_API_KEY"):
+    assert Settings.load(config).llm.api_key == "legacy-secret"
+
+
+def test_openai_key_is_required_without_either_supported_environment_name(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text('llm:\n  provider: "openai"\n  system_prompt: "Direct the game."\n')
+    monkeypatch.delenv("AD_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AD_LLM__API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "stale-secret")
+
+    with pytest.raises(ConfigLoadError, match="AD_LLM__API_KEY"):
         Settings.load(config)
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("temperature", -0.1),
+        ("top_p", 1.1),
+        ("top_k", -1),
+        ("min_p", 1.1),
+        ("presence_penalty", 2.1),
+        ("repeat_penalty", 0),
+    ],
+)
+def test_sampling_parameters_validate_ranges(name, value):
+    with pytest.raises(ValidationError, match=name):
+        LLMConfig(system_prompt="Direct the game.", **{name: value})
+
+
+@pytest.mark.parametrize("name", ["top_k", "min_p", "repeat_penalty"])
+def test_compatible_only_sampling_parameters_rejected_for_openai(name):
+    with pytest.raises(ValidationError, match="require provider 'compatible'"):
+        LLMConfig(
+            system_prompt="Direct the game.",
+            provider="openai",
+            **{name: 1},
+        )
 
 
 def test_openai_schema_omits_unsupported_strict_keywords() -> None:

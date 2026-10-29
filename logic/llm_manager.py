@@ -93,7 +93,7 @@ class LLMContextManager:
         self._memory_revision = 0
 
     def _create_client(self) -> AsyncOpenAI:
-        """Create either a direct OpenAI client or a local compatible client."""
+        """Create a direct OpenAI or configured OpenAI-compatible client."""
         client_options: dict[str, Any] = {
             "api_key": settings.llm.api_key,
             "timeout": settings.llm.request_timeout_seconds,

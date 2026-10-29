@@ -3,6 +3,13 @@ services:
   llama:
     image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
     pull_policy: missing
+    # llama.cpp only draws its download progress bar when stdout is a TTY.
+    tty: true
+    entrypoint:
+    - /bin/sh
+    - -c
+    - echo "Starting llama.cpp; the model may need to download on first launch. This can take some time, please be patient."; exec /app/llama-server "$@"
+    - --
     restart: unless-stopped
     init: true
     logging:

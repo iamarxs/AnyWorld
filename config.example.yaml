@@ -11,7 +11,6 @@ server:
 llm:
   provider: "compatible" # use "openai" for the direct OpenAI API
   endpoint: "http://localhost:8033/v1"
-  api_key: "sk-no-key-required"
   # Local fallback when discovery fails. llama.cpp /props takes precedence.
   context_window_size: 16384
   # OpenAI fallback: check the selected model's documented context limit and pricing.
@@ -19,6 +18,14 @@ llm:
   openai_context_window_size: 245760
   # https://developers.openai.com/api/docs/pricing
   model_name: "local"
+
+  # Optional per-request sampling overrides; null keeps backend defaults.
+  temperature: null
+  top_p: null
+  top_k: null # compatible providers only
+  min_p: null # compatible providers only
+  presence_penalty: null
+  repeat_penalty: null # compatible providers only
 
   # llama.cpp uses its own /apply-template and /tokenize endpoints.
   tokenizer_encoding: null # legacy OpenAI fallback when the setting below is omitted/null

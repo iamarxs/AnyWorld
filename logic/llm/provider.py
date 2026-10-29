@@ -81,15 +81,36 @@ async def attempt(
     error = None
     cap_key = "max_tokens" if settings.llm.provider == "compatible" else "max_completion_tokens"
     effort = self.budget.reasoning_effort(kind)
-    template_options = self.budget.template_options(kind)
+    extra_body = self.budget.template_options(kind)
+    extra_body.update(
+        {
+            name: value
+            for name, value in (
+                ("top_k", settings.llm.top_k),
+                ("min_p", settings.llm.min_p),
+                ("repeat_penalty", settings.llm.repeat_penalty),
+            )
+            if value is not None
+        }
+    )
+    sampling = {
+        name: value
+        for name, value in (
+            ("temperature", settings.llm.temperature),
+            ("top_p", settings.llm.top_p),
+            ("presence_penalty", settings.llm.presence_penalty),
+        )
+        if value is not None
+    }
     try:
         with request_type_context(kind):
             response = await self.client.beta.chat.completions.parse(
                 model=settings.llm.model_name,
                 messages=messages,
                 response_format=schema,
+                **sampling,
                 **({"reasoning_effort": effort} if settings.llm.provider == "openai" else {}),
-                **({"extra_body": template_options} if template_options else {}),
+                **({"extra_body": extra_body} if extra_body else {}),
                 **{cap_key: self.budget.request_output_limit(kind)},
             )
         choice = response.choices[0]

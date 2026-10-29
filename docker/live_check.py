@@ -92,7 +92,7 @@ def main():
         MODEL_ALIAS="live-test",
         AD_SERVER__HOST_PASSWORD=secrets.token_urlsafe(24),
         AD_SERVER__PLAYER_PASSWORD=secrets.token_urlsafe(24),
-        GAME_CONFIG=(ROOT / "docker/game.example.yaml").as_posix(),
+        GAME_CONFIG=(ROOT / "config.example.yaml").as_posix(),
         CHAT_TEMPLATE_FILE=(
             ROOT / "docker/templates/google-gemma-4-canonical-templ.jinja"
         ).as_posix(),
@@ -118,9 +118,15 @@ def main():
                 source += ["-f", str(ROOT / file)]
             source += ["--profile", "tunnel"]
             config = json.loads(
-                run(source + ["config", "--format", "json"], capture_output=True, text=True).stdout
+                run(
+                    source + ["config", "--no-env-resolution", "--format", "json"],
+                    capture_output=True,
+                    text=True,
+                ).stdout
             )
             game, llama = config["services"]["game"], config["services"]["llama"]
+            # Keep the live backend check isolated from the developer's project .env.
+            game["env_file"] = [{"path": empty.as_posix(), "required": False}]
             # Keep acceptance checks away from the host's real archives.
             for mount in game["volumes"]:
                 if mount["target"] in ("/app/.logged_games", "/app/.debug"):

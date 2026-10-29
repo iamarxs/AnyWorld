@@ -39,9 +39,9 @@ class TokenBudget:
     def __init__(self) -> None:
         """Initialize provider discovery state and bounded local count caches.
 
-        Compatible providers are measured through their chat template and tokenizer
-        when those endpoints respond.  Other paths use the conservative local
-        estimate until a provider-specific tokenizer is known.
+        llama.cpp-compatible providers use their chat template and tokenizer when
+        those endpoints respond. Other paths use the conservative local estimate
+        until a provider-specific tokenizer is known.
         """
         self._http: httpx.AsyncClient | None = None
         self.context_window_size = (
@@ -52,6 +52,7 @@ class TokenBudget:
         )
         self.context_window_source = "configured fallback"
         self._context_discovered = settings.llm.provider != "compatible"
+        self._llama_cpp_detected = False
         self.encoding = None
         self._encoding_loaded = False
         self.token_count_method = "conservative UTF-8 estimate"
@@ -127,10 +128,9 @@ class TokenBudget:
         base = settings.llm.endpoint.rstrip("/")
         return base[:-3] if base.endswith("/v1") else base
 
-    @staticmethod
-    def template_options(kind: str = "round") -> dict[str, Any]:
-        """Use the same explicit llama.cpp template options for counting and generation."""
-        if settings.llm.provider == "compatible":
+    def template_options(self, kind: str = "round") -> dict[str, Any]:
+        """Use llama.cpp template options consistently for counting and generation."""
+        if settings.llm.provider == "compatible" and self._llama_cpp_detected:
             effort = TokenBudget.reasoning_effort(kind)
             return {
                 "chat_template_kwargs": {
@@ -223,7 +223,11 @@ class TokenBudget:
             except (KeyError, ValueError, OSError):
                 # Unknown/mismatched encodings retain the conservative byte estimate.
                 self.encoding = None
-        if settings.llm.provider == "compatible" and not _LOCAL_ONLY.get():
+        if (
+            settings.llm.provider == "compatible"
+            and self._llama_cpp_detected
+            and not _LOCAL_ONLY.get()
+        ):
             if monotonic() < self._backend_retry_at:
                 self.token_count_method = "conservative UTF-8 estimate"
                 return self.context_size(messages)
@@ -266,6 +270,13 @@ class TokenBudget:
             response = await http.get(self._backend_base() + "/props")
             response.raise_for_status()
             props = response.json()
+            generation_settings = (
+                props.get("default_generation_settings") if isinstance(props, dict) else None
+            )
+            if not isinstance(generation_settings, dict):
+                self._context_discovered = True
+                return
+            self._llama_cpp_detected = True
             self._template_identity = sha256(
                 json.dumps(
                     {
@@ -276,7 +287,8 @@ class TokenBudget:
                 ).encode("utf-8")
             ).hexdigest()
             # Only use the generation slot's context, not an ambiguous global n_ctx.
-            discovered = props.get("default_generation_settings", {}).get("n_ctx")
+            discovered = generation_settings.get("n_ctx")
+            self._context_discovered = True
             if (
                 isinstance(discovered, int)
                 and not isinstance(discovered, bool)
@@ -285,6 +297,12 @@ class TokenBudget:
                 self.context_window_size = discovered
                 self.context_window_source = "llama.cpp /props per-slot n_ctx"
                 self._context_discovered = True
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {400, 401, 403, 404, 405, 501}:
+                self._context_discovered = True
+                self._llama_cpp_detected = False
+            else:
+                self._discovery_retry_at = monotonic() + 1.0
         except (httpx.HTTPError, ValueError, TypeError, AttributeError):
             self._discovery_retry_at = monotonic() + 1.0
 

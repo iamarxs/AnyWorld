@@ -3,6 +3,9 @@ name: anyworld
 services:
   game:
     build: .
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
     init: true
     logging:
@@ -23,7 +26,7 @@ services:
       - "${GAME_BIND_ADDRESS:-0.0.0.0}:${GAME_PORT:-4141}:4141"
     volumes:
       - type: bind
-        source: ${GAME_CONFIG:-./docker/game.example.yaml}
+        source: ${GAME_CONFIG:-./config.yaml}
         target: /config/game.yaml
         read_only: true
         bind:
