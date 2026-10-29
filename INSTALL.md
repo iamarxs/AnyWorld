@@ -70,12 +70,17 @@ server:
 llm:
   provider: "compatible" # use "openai" for the direct OpenAI API
   endpoint: "http://localhost:8033/v1"
-  api_key: "sk-no-key-required"
   context_window_size: 16384 # used only if local context discovery fails
   openai_context_window_size: 245760 # keeps OpenAI requests below higher pricing
   tokenizer_encoding: null # legacy fallback; local llama.cpp uses its own tokenizer
   openai_tokenizer_encoding: auto
   model_name: "local"
+  temperature: null # optional request override; null keeps backend defaults
+  top_p: null
+  top_k: null # compatible providers only
+  min_p: null # compatible providers only
+  presence_penalty: null
+  repeat_penalty: null # compatible providers only
   system_prompt: >
     Direct a coherent multiplayer RPG. Resolve actions simultaneously, preserve established
     facts and exact player names, and reserve dice for meaningful risks. Keep hidden
@@ -91,8 +96,10 @@ AD_LLM__MODEL_NAME=local
 AD_LLM__REQUEST_TIMEOUT_SECONDS=180
 ```
 
-`AD_OPENAI_API_KEY` is the only API-key source when `provider: openai` is selected. Secrets should
-stay in the process environment or `.env`, not in a committed configuration file.
+Use `AD_LLM__API_KEY` in `.env` or the process environment for the API key. It is required for
+`provider: openai` and optional for compatible backends. The legacy `AD_OPENAI_API_KEY` remains
+accepted for direct OpenAI setups. Secrets should stay in the environment or `.env`, not in a
+committed configuration file.
 
 ### Switching between local llama.cpp and OpenAI
 
@@ -103,7 +110,6 @@ llm:
   provider: "compatible"
   endpoint: "http://localhost:8033/v1"
   model_name: "local"
-  api_key: "sk-no-key-required"
 ```
 
 Start llama-server and load a model before starting Anyworld. The game does not
@@ -111,20 +117,25 @@ install or launch it in a Python setup. For automatic installation, model downlo
 and startup, use [Docker Quick Startup](DOCKER.md#quick-startup).
 
 If you already run llama-server, set `endpoint` to its address, including `/v1`,
-and set `model_name` to its served alias. The server
-must support structured responses through the OpenAI-compatible Chat Completions API.
-Anyworld asks llama.cpp for its context limit and token counts when supported.
+and set `model_name` to its served alias. The server must support structured responses
+through the OpenAI-compatible Chat Completions API. Anyworld asks llama.cpp for its
+context limit and token counts when supported.
+
+For a generic compatible cloud API, set its endpoint and model ID. Anyworld detects
+llama.cpp-specific context, tokenizer, and thinking support automatically from `/props`;
+other compatible APIs use the configured context fallback and local token estimates. Set
+`AD_LLM__API_KEY` in `.env` if the service requires a key.
 
 To use OpenAI directly, follow the [official API setup guide](https://developers.openai.com/api/docs/quickstart)
 for API credentials and billing. Set the key in a project-root `.env` file:
 
 ```dotenv
-AD_OPENAI_API_KEY=your-api-key-here
+AD_LLM__API_KEY=your-api-key-here
 ```
 
-Keep `.env` private. Anyworld loads `AD_OPENAI_API_KEY` with `python-dotenv` when the provider is
-`openai`; the key does not need to be written into `config.yaml` and is never printed in normal
-logs. Then change these values in the existing `llm` section; keep its other settings
+Keep `.env` private. Anyworld loads `AD_LLM__API_KEY` with `python-dotenv`; the key does not need
+to be written into `config.yaml` and is never printed in normal logs. `AD_OPENAI_API_KEY` remains
+accepted as a legacy alias. Then change these values in the existing `llm` section; keep its other settings
 and full `system_prompt`:
 
 ```yaml
@@ -135,7 +146,6 @@ llm:
   openai_context_window_size: 245760 # budget below the long-context pricing threshold
   openai_tokenizer_encoding: auto # GPT-5.6 maps to o200k_base in tiktoken
   endpoint: "http://localhost:8033/v1" # ignored for provider: openai
-  api_key: "sk-no-key-required" # ignored for provider: openai; use AD_OPENAI_API_KEY
 ```
 
 Direct OpenAI support has been tested live with `gpt-5.6-luna`, including scenario titles,
@@ -144,16 +154,17 @@ window is approximately 1.05 million tokens, but the example intentionally uses 
 OpenAI budget to avoid long-context pricing; see the explanation below.
 The token display distinguishes retained context from total AI usage.
 
-To switch back, restore `provider: "compatible"`, the local endpoint, and the local model name.
-The `.env` file may remain in place; its key is only used when `provider: "openai"` is selected.
+To use a generic OpenAI-compatible cloud service, set `provider: "compatible"`,
+its `endpoint` (including `/v1`), and model ID in `model_name`.
+The same `AD_LLM__API_KEY` setting supplies its optional bearer key. For local llama.cpp,
+use the local endpoint and served model alias. The `.env` key remains available when
+switching providers.
 
 ### Context size and OpenAI costs
 
-For local backends, `endpoint` must support OpenAI-compatible structured chat completion parsing.
-`context_window_size` is an optional fallback value. When using a compatible backend, Anyworld
-still attempts to read the context size from the llama.cpp `/props` endpoint even when a value is
-configured. A successful discovery takes precedence; if discovery is unavailable, the configured
-value is used. The example uses 16,384 tokens; omitting the setting uses the internal
+For compatible backends, `endpoint` must support OpenAI-compatible structured chat completion
+parsing. Anyworld detects llama.cpp's `/props` support automatically; other compatible services
+use the configured fallback and local token estimates. The example uses 16,384 tokens; omitting the setting uses the internal
 default of 8,192. OpenAI does not
 provide automatic context-limit discovery; its optional `openai_context_window_size` setting
 selects a separate fallback (245,760 in the examples). If omitted/null, it continues using
@@ -279,9 +290,9 @@ The title-only request uses at most 128 output tokens (or the initial output cap
 
 ## Run
 
-For `provider: compatible`, start your model server first. Development has used llama.cpp;
-compatibility with other servers depends on their structured-response support. For
-`provider: openai`, ensure `.env` contains `AD_OPENAI_API_KEY`; startup fails if it is missing.
+For `provider: compatible`, ensure the configured OpenAI-compatible service is reachable and
+supports structured responses. For `provider: openai`,
+ensure `.env` contains `AD_LLM__API_KEY` (or legacy `AD_OPENAI_API_KEY`); startup fails if neither is set.
 Run from the repository root:
 
 Windows PowerShell:
@@ -407,8 +418,12 @@ These model-server settings worked well during development:
 | Presence penalty (`--presence-penalty`) | `0.0`  |
 | Repeat penalty (`--repeat-penalty`)     | `1.0`  |
 
-Set these in llama-server, not the game's YAML. The complete local launch settings
-are in `compose.llama.yaml`. Other models may need different settings. Smaller
+These values are the llama-server defaults in `compose.llama.yaml`. The optional
+request-level settings in `llm` can override them for game requests. Configure
+`temperature`, `top_p`, `presence_penalty`, `top_k`, `min_p`, or `repeat_penalty`;
+leave a value `null` to keep the backend default. Direct OpenAI accepts the first
+three when supported by the selected model; `top_k`, `min_p`, and `repeat_penalty`
+are compatible-provider extensions. Smaller
 context limits cause more frequent summaries; summary checks do not guarantee
 perfect recall.
 
@@ -536,3 +551,39 @@ Request headers and API credentials are excluded. The game does not serve these
 files to browsers, and Git ignores them. They are not automatically
 rotated or deleted: disable debug logging after diagnosis and remove files you no
 longer need. Restarting to change debug settings loses the current game.
+
+## Example AI Providers
+
+For the GPU-poor and others who want to use a cloud API other than OpenAI.
+
+_Disclaimer: I'm not affiliated with the below site, AnyWorld only receives a link
+in the site's Integrations page for mentioning the provider here._
+
+- [DemonRoute](https://demonroute.com) - Prepaid, privacy-first API gateway for open-weight and uncensored AI models
+
+  Example configuration (use a model ID provided by the service):
+
+  ```yaml
+  llm:
+    provider: "compatible"
+    endpoint: "https://api.demonroute.com/v1"
+    model_name: "<model-id>"
+  ```
+
+  Keep its API key in the project-root `.env` as `AD_LLM__API_KEY` for both regular and Docker
+  Compose installations. Verify that the selected model supports Anyworld's structured chat responses.
+
+  **Docker Compose:** Use the same project-root `config.yaml` as the regular installation (create
+  it from `config.example.yaml` if needed); put the `provider`, `endpoint` and `model_name` settings
+  above under `llm`. In the project-root `docker.env` (copy from `docker/deployment.env.example` if needed), set:
+
+  ```dotenv
+  COMPOSE_FILE=compose.yaml
+  GAME_CONFIG=./config.yaml
+  ```
+
+  Select only `compose.yaml`; do not include `compose.llama.yaml`. Then launch with the standard command:
+
+  ```bash
+  docker compose --env-file docker.env up --build
+  ```

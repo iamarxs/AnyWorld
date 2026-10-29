@@ -204,9 +204,10 @@ coverage for budgets, memory, privacy, authentication, cancellation and reconnec
 
 `compose.yaml` provides the HTTPS game and optional account-free Quick Tunnel.
 `compose.llama.yaml` adds NVIDIA CUDA llama.cpp, native HF downloads and readiness ordering;
-CPU inference is not supported. `compose.openai.yaml` selects the remote API and defines no
-local backend or model cache. `compose.debug.yaml` enables raw diagnostics in the host `data/debug/` folder.
-`docker.env` selects the files/profile and deployment settings. Game YAML is mounted read-only;
+CPU inference is not supported. Remote APIs use `compose.yaml` with provider, endpoint and model
+from the project `config.yaml`; `compose.openai.yaml` is a legacy no-op. The project `.env` supplies
+API credentials to both regular installs and the game container. `docker.env` selects the files/profile
+and deployment settings. The configured game YAML (root `config.yaml` by default) is mounted read-only;
 model-server flags live in the local backend's Compose argument list. The canonical Jinja file
 is in `docker/templates/`; it permits thinking. Generated certs and model cache persist in named
 volumes; transcripts and diagnostics use host `data/logged_games/` and `data/debug/` bind mounts; active game state/public History stay in memory. The tunnel

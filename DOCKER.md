@@ -22,6 +22,14 @@ This starts **local llama.cpp on an NVIDIA GPU**, the recommended model for
    On Linux, use `cp docker/deployment.env.example docker.env` instead.
    If you already have `docker.env`, edit it instead of replacing it.
 
+   Ensure the regular game configuration exists; create it from the example if needed:
+
+   ```powershell
+   if (!(Test-Path config.yaml)) { Copy-Item config.example.yaml config.yaml }
+   ```
+
+   On Linux, use `test -f config.yaml || cp config.example.yaml config.yaml`.
+
 2. Set these values in `docker.env`, including distinct host and player passwords:
 
    ```dotenv
@@ -34,7 +42,8 @@ This starts **local llama.cpp on an NVIDIA GPU**, the recommended model for
    ```
 
    The remaining defaults select llama.cpp, its inference settings and the canonical
-   Jinja template, with `reasoning_effort: none` recommended for gameplay (in docker/game.example.yaml).
+   Jinja template. The game uses the same root `config.yaml` as a regular installation;
+   llama.cpp's Docker endpoint and model alias are supplied by its Compose overlay.
 
 3. On Linux, first complete the one-time [folder permissions setup](#saved-files).
    On Windows and macOS, Docker creates the folders automatically. Launch:
@@ -61,22 +70,27 @@ This starts **local llama.cpp on an NVIDIA GPU**, the recommended model for
 ## Set up once
 
 Copy `docker/deployment.env.example` to `docker.env` (PowerShell: `Copy-Item`;
-Linux/macOS: `cp`). Edit **docker.env**: this is the place for deployment settings.
-Set different `AD_SERVER__HOST_PASSWORD` and `AD_SERVER__PLAYER_PASSWORD` values.
-Keep this file private; it contains passwords and, for OpenAI, your API key.
+Linux/macOS: `cp`). Edit **docker.env** for deployment settings such as backend
+selection, passwords and network addresses. Keep it private. Set provider, endpoint
+and model in the regular project-root `config.yaml`. API keys stay in the project-root
+`.env`, which Compose passes to the game container automatically.
 
 Choose one backend by setting `COMPOSE_FILE`:
 
-| Backend                          | Value                               |
-| -------------------------------- | ----------------------------------- |
-| Local llama.cpp on an NVIDIA GPU | `compose.yaml\|compose.llama.yaml`  |
-| Remote OpenAI API                | `compose.yaml\|compose.openai.yaml` |
+| Backend                          | Value                              |
+| -------------------------------- | ---------------------------------- |
+| Local llama.cpp on an NVIDIA GPU | `compose.yaml\|compose.llama.yaml` |
+| OpenAI or another remote API     | `compose.yaml`                     |
 
-`compose.yaml` runs the game and defines
-the optional tunnel. `compose.llama.yaml` adds the local AI server and its model
-settings. `compose.openai.yaml` connects the game to OpenAI instead.
-`compose.debug.yaml` adds raw-response diagnostic logging. Select exactly one backend;
-do not combine the llama and OpenAI files.
+`compose.yaml` runs the game and defines the optional tunnel. `compose.llama.yaml`
+adds the local AI server and its model settings. `compose.openai.yaml` is a legacy
+no-op; remote API provider settings now come from `config.yaml`. `compose.debug.yaml`
+adds raw-response diagnostic logging. Select the llama overlay only for the local backend.
+
+For OpenAI or a compatible cloud API, create the project-root `.env` from
+`.env.example` if needed and set `AD_LLM__API_KEY` there. A key is not required for
+local llama.cpp. Compose passes the `.env` variables into the game container, so
+keep that file limited to the game's runtime environment values.
 
 Keep `COMPOSE_PATH_SEPARATOR=|`. For raw response logging, append
 `|compose.debug.yaml` to the selected value. For a temporary public link, set
@@ -102,10 +116,10 @@ that context is not guaranteed to fit every 16 GB GPU. The included canonical
 Jinja template permits thinking; the game defaults to `reasoning_effort: none`,
 recommended for gameplay.
 
-For OpenAI, set `OPENAI_MODEL` and `AD_OPENAI_API_KEY` in docker.env. API use is
-charged to your OpenAI account. This selection starts only
-the game (and optional tunnel), with no llama service, model download or model
-volume. You can switch providers using the same built image.
+For OpenAI, set `provider: openai` and the model ID in `config.yaml`, and put the key
+in `.env` as `AD_LLM__API_KEY`. API use is charged to your OpenAI account. Use
+`COMPOSE_FILE=compose.yaml`; this starts only the game (and optional tunnel), with no
+llama service, model download or model volume. You can switch providers using the same built image.
 
 ## Start, connect and stop
 
@@ -194,20 +208,24 @@ again with `docker compose --env-file docker.env up --build`. To change
 backend or debug mode, end the game and run `down` **before** changing
 `COMPOSE_FILE`, then run `up --build`. The image and saved volumes remain reusable.
 
-For gameplay settings, copy `docker/game.example.yaml` to `docker/game.yaml`,
-set `GAME_CONFIG=./docker/game.yaml` in docker.env, and edit that YAML. It
-supports the same options as `config.example.yaml`. Provider, model, passwords,
-networking and debug mode come from the deployment configuration; set those
-in docker.env instead of duplicating them in the game YAML.
+For gameplay settings, edit the regular project-root `config.yaml`; Compose mounts
+that same file read-only by default. To use a separate file, set `GAME_CONFIG` in
+docker.env. Passwords, networking and debug mode remain deployment settings in
+docker.env and Compose.
+
+For a generic OpenAI-compatible cloud API, use `COMPOSE_FILE=compose.yaml`, set
+`provider: compatible`, the endpoint and model ID in `config.yaml`, and put the API key
+in `.env`. Leave the API key out of YAML. The generic endpoint must support
+OpenAI-compatible structured chat completions.
 
 For llama-server tuning, edit the **command argument list** in
 `compose.llama.yaml`. Every upstream flag
 is accepted; quote numeric/boolean arguments as strings. No shell evaluation or
-custom argument parser is involved. These lists are the sole source for server
-hyperparameters; no extra override file is needed. Advanced mounts and environment
-variables can still use standard Compose overrides.
+custom argument parser is involved. These lists set server defaults; sampling values
+in game YAML override them per request. Advanced mounts and environment variables
+can still use standard Compose overrides.
 
-The local backend discovers the live per-slot context through `/props`. The game
+The llama.cpp backend discovers the live per-slot context through `/props`. The game
 YAML's `context_window_size` is only a local fallback (16,384 by default).
 OpenAI uses `openai_context_window_size` (245,760 in the example). This is a
 smaller budget to trigger summaries before the higher-price input threshold;
@@ -217,8 +235,9 @@ tiktoken mappings, while llama.cpp uses its native tokenizer endpoints. Unknown
 OpenAI models retain conservative byte estimates; do not assume a GPT-6 encoding.
 Check the chosen model's limit and pricing. Omitting that optional value preserves the older
 `context_window_size` behavior. Game requests override output limits, reasoning
-effort and thinking/template options. Omitted sampling parameters inherit the
-llama-server defaults. NVIDIA mlock uses unlimited memlock and `IPC_LOCK` only
+effort and thinking/template options. Set sampling values in game YAML to override
+llama-server defaults per request; omitted values inherit those server defaults.
+NVIDIA mlock uses unlimited memlock and `IPC_LOCK` only
 in the llama container.
 
 ## LAN, VPN and direct internet access
