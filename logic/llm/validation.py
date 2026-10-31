@@ -145,7 +145,7 @@ def normalize_hidden_roll_sources(plan: DicePlan, guidance: str) -> DicePlan:
             sources[name] = valid_sources[normalized]
         else:
             logger.info(
-                "Treating unsupported hidden classification for %r as a public action roll",
+                "Ignoring unsupported hidden classification for %r; action roll remains public",
                 name,
             )
     return plan.model_copy(update={"hidden_rolls": hidden, "hidden_roll_sources": sources})

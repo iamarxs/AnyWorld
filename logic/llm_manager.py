@@ -550,6 +550,12 @@ class LLMContextManager:
                 logger.warning(
                     "LLM %s output validation failed (repair=%d): %s", kind, repair, str(exc)
                 )
+                if settings.llm.debug_raw_responses and result is not None:
+                    logger.warning(
+                        "Rejected LLM response (repair=%d): %s",
+                        repair,
+                        response_text or result.model_dump_json(),
+                    )
                 if repair == settings.llm.max_retries:
                     raise
                 if kind == "dice" and isinstance(exc, LLMOutputTruncatedError):
