@@ -27,7 +27,7 @@ services:
     - --fit-ctx
     - '131072'
     - --fit-target
-    - '0'
+    - ${LLAMA_FIT_TARGET:-1024}
     - -ngl
     - '99'
     - -np
