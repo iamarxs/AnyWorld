@@ -1,0 +1,14 @@
+# UNTESTED BETA: The maintainer has no Mac and has not tested this overlay.
+# vLLM-Metal must run natively on an Apple Silicon Mac; Linux containers cannot
+# access the host's Metal GPU. Start the native server before starting Compose.
+# Its first launch downloads the Hugging Face model; this overlay does not manage
+# the native process or download the model itself.
+services:
+  game:
+    environment:
+      AD_LLM__PROVIDER: compatible
+      AD_LLM__ENDPOINT: http://host.docker.internal:8000/v1
+      AD_LLM__MODEL_NAME: ${VLLM_METAL_MODEL:-mlx-community/gemma-4-26b-a4b-it-4bit}
+
+# Alternative abliterated MLX conversion (also untested with vLLM-Metal):
+# ailexleon/gemma-4-26B-A4B-it-qat-uncensored-heretic-mlx-lm-4Bit
